@@ -155,6 +155,8 @@ module OMQ
           heartbeat_interval: @options.heartbeat_interval,
           heartbeat_ttl: @options.heartbeat_ttl,
           heartbeat_timeout: @options.heartbeat_timeout,
+          sndbuf: @options.sndbuf,
+          rcvbuf: @options.rcvbuf,
         )
       when "ipc"
         unix = Transport::IPC.connect(endpoint)
@@ -170,6 +172,8 @@ module OMQ
           heartbeat_interval: @options.heartbeat_interval,
           heartbeat_ttl: @options.heartbeat_ttl,
           heartbeat_timeout: @options.heartbeat_timeout,
+          sndbuf: @options.sndbuf,
+          rcvbuf: @options.rcvbuf,
         )
       else
         raise UnsupportedTransport.new(scheme)
@@ -332,6 +336,8 @@ module OMQ
             heartbeat_interval: @options.heartbeat_interval,
             heartbeat_ttl: @options.heartbeat_ttl,
             heartbeat_timeout: @options.heartbeat_timeout,
+            sndbuf: @options.sndbuf,
+            rcvbuf: @options.rcvbuf,
           )
           register_pipe(pipe)
         rescue IO::Error | ProtocolError
@@ -358,6 +364,8 @@ module OMQ
             heartbeat_interval: @options.heartbeat_interval,
             heartbeat_ttl: @options.heartbeat_ttl,
             heartbeat_timeout: @options.heartbeat_timeout,
+            sndbuf: @options.sndbuf,
+            rcvbuf: @options.rcvbuf,
           )
           register_pipe(pipe)
         rescue IO::Error | ProtocolError

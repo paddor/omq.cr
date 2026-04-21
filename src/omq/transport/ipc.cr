@@ -80,8 +80,12 @@ module OMQ
         heartbeat_interval : Time::Span? = nil,
         heartbeat_ttl : Time::Span? = nil,
         heartbeat_timeout : Time::Span? = nil,
+        sndbuf : Int32? = nil,
+        rcvbuf : Int32? = nil,
       ) : Pipe
         sock.sync = false
+        sock.send_buffer_size = sndbuf if sndbuf
+        sock.recv_buffer_size = rcvbuf if rcvbuf
         zmtp = ZMTP::Connection.new(sock, mechanism, max_message_size)
         zmtp.handshake(
           local_socket_type: local_socket_type,

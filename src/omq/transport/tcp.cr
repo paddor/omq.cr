@@ -65,6 +65,8 @@ module OMQ
         heartbeat_interval : Time::Span? = nil,
         heartbeat_ttl : Time::Span? = nil,
         heartbeat_timeout : Time::Span? = nil,
+        sndbuf : Int32? = nil,
+        rcvbuf : Int32? = nil,
       ) : Pipe
         tcp.sync = false
         # Match libzmq/JeroMQ: disable Nagle so multi-write messages (frame
@@ -72,6 +74,8 @@ module OMQ
         # delayed-ACK timer. Round-trip latency for ≥ ~32 KiB messages goes
         # from ~90 ms to ~1 ms with NODELAY.
         tcp.tcp_nodelay = true
+        tcp.send_buffer_size = sndbuf if sndbuf
+        tcp.recv_buffer_size = rcvbuf if rcvbuf
         zmtp = ZMTP::Connection.new(tcp, mechanism, max_message_size)
         zmtp.handshake(
           local_socket_type: local_socket_type,
