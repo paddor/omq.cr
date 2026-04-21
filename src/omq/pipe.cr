@@ -39,6 +39,15 @@ module OMQ
       @tx.close unless @tx.closed?
     end
 
+    # Block until this pipe is terminated — either the app closed the
+    # send side and the write pump drained, or the wire went away. For
+    # inproc pipes (no write pump) the channel is pre-closed, so this
+    # returns immediately — callers should only use it for transport
+    # pipes where reconnect makes sense (TCP, IPC).
+    def await_closed : Nil
+      @send_done.receive?
+    end
+
     # Block until the write pump has drained `tx` (or `span` elapses).
     # Returns `true` on drain, `false` on timeout. `nil` = wait forever.
     def await_drained(span : Time::Span?) : Bool

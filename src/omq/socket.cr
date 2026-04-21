@@ -19,6 +19,7 @@ module OMQ
     @ipc_listeners = [] of Transport::IPC::Listener
     @pipes = [] of Pipe
     @committed = false
+    @shutdown = Channel(Nil).new
 
     def initialize(endpoint : String? = nil)
       @options = Options.new
@@ -74,49 +75,125 @@ module OMQ
     def connect(endpoint : String) : self
       commit_options
       scheme, rest = parse_endpoint(endpoint)
-      pipe = case scheme
-             when "inproc"
-               Transport::Inproc.connect(rest, capacity: @options.recv_hwm, local_identity: @options.identity)
-             when "tcp"
-               tcp = Transport::TCP.connect(endpoint)
-               Transport::TCP.adopt(
-                 tcp,
-                 local_socket_type: socket_type,
-                 local_identity: @options.identity,
-                 as_server: false,
-                 send_capacity: @options.send_hwm,
-                 recv_capacity: @options.recv_hwm,
-                 mechanism: @options.mechanism,
-                 max_message_size: @options.max_message_size,
-               )
-             when "ipc"
-               unix = Transport::IPC.connect(endpoint)
-               Transport::IPC.adopt(
-                 unix,
-                 local_socket_type: socket_type,
-                 local_identity: @options.identity,
-                 as_server: false,
-                 send_capacity: @options.send_hwm,
-                 recv_capacity: @options.recv_hwm,
-                 mechanism: @options.mechanism,
-                 max_message_size: @options.max_message_size,
-               )
-             else
-               raise UnsupportedTransport.new(scheme)
-             end
-      register_pipe(pipe)
+      case scheme
+      when "inproc"
+        pipe = Transport::Inproc.connect(rest, capacity: @options.recv_hwm, local_identity: @options.identity)
+        register_pipe(pipe)
+      when "tcp", "ipc"
+        # First attempt synchronously so a happy-path connect gives the
+        # caller a usable pipe before returning. On failure, hand off to
+        # the retry loop in the background.
+        begin
+          pipe = dial(scheme, endpoint)
+          register_pipe(pipe)
+          spawn supervise_pipe(pipe, scheme, endpoint)
+        rescue IO::Error | ProtocolError
+          spawn connection_manager(scheme, endpoint, initial_delay: nil)
+        end
+      else
+        raise UnsupportedTransport.new(scheme)
+      end
       self
     end
 
     def close : Nil
       return if @closed
       @closed = true
+      @shutdown.close
       @inproc_names.each { |n| Transport::Inproc.unbind(n) }
       @tcp_listeners.each(&.close)
       @ipc_listeners.each(&.close)
       drain_for_linger(@options.linger)
       @pipes.each(&.close)
       on_close
+    end
+
+    # Supervises an already-attached pipe: waits until it terminates
+    # (peer gone, handshake torn down) and starts the reconnect loop.
+    private def supervise_pipe(pipe : Pipe, scheme : String, endpoint : String) : Nil
+      pipe.await_closed
+      return if @closed
+      @pipes.delete(pipe)
+      connection_manager(scheme, endpoint, initial_delay: nil)
+    end
+
+    # Retry loop for TCP/IPC: keeps dialing (with `reconnect_interval`
+    # backoff) until a pipe succeeds, then supervises that pipe and loops
+    # back. Exits when the socket is closed.
+    private def connection_manager(scheme : String, endpoint : String, initial_delay : Time::Span?) : Nil
+      delay_hint = initial_delay
+      until @closed
+        delay_hint = next_reconnect_delay(delay_hint)
+        break unless sleep_with_shutdown(delay_hint)
+        break if @closed
+        begin
+          pipe = dial(scheme, endpoint)
+        rescue IO::Error | ProtocolError
+          next
+        end
+        register_pipe(pipe)
+        pipe.await_closed
+        break if @closed
+        @pipes.delete(pipe)
+        delay_hint = nil
+      end
+    end
+
+    private def dial(scheme : String, endpoint : String) : Pipe
+      case scheme
+      when "tcp"
+        tcp = Transport::TCP.connect(endpoint)
+        Transport::TCP.adopt(
+          tcp,
+          local_socket_type: socket_type,
+          local_identity: @options.identity,
+          as_server: false,
+          send_capacity: @options.send_hwm,
+          recv_capacity: @options.recv_hwm,
+          mechanism: @options.mechanism,
+          max_message_size: @options.max_message_size,
+        )
+      when "ipc"
+        unix = Transport::IPC.connect(endpoint)
+        Transport::IPC.adopt(
+          unix,
+          local_socket_type: socket_type,
+          local_identity: @options.identity,
+          as_server: false,
+          send_capacity: @options.send_hwm,
+          recv_capacity: @options.recv_hwm,
+          mechanism: @options.mechanism,
+          max_message_size: @options.max_message_size,
+        )
+      else
+        raise UnsupportedTransport.new(scheme)
+      end
+    end
+
+    # Current reconnect delay. First failure → `ri.begin` (or the fixed
+    # span). Subsequent failures double up to `ri.end` when configured
+    # as a range.
+    private def next_reconnect_delay(prev : Time::Span?) : Time::Span
+      ri = @options.reconnect_interval
+      case ri
+      in Time::Span
+        ri
+      in Range(Time::Span, Time::Span)
+        return ri.begin if prev.nil? || prev < ri.begin
+        doubled = prev * 2
+        doubled > ri.end ? ri.end : doubled
+      end
+    end
+
+    # Sleep for `span`, or return early if the socket is closed. Returns
+    # `true` if the full span elapsed, `false` if interrupted by close.
+    private def sleep_with_shutdown(span : Time::Span) : Bool
+      select
+      when @shutdown.receive?
+        false
+      when timeout(span)
+        true
+      end
     end
 
     # Two-phase drain so in-flight sends reach the wire before teardown.
