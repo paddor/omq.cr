@@ -9,6 +9,29 @@ class Minitest::Test
 end
 
 module OMQ::TestHelper
+  # Glue a separate read IO and write IO into one duplex IO.
+  class DuplexIO < IO
+    def initialize(@read : IO, @write : IO)
+    end
+
+    def read(slice : Bytes) : Int32
+      @read.read(slice)
+    end
+
+    def write(slice : Bytes) : Nil
+      @write.write(slice)
+    end
+
+    def flush : Nil
+      @write.flush
+    end
+
+    def close : Nil
+      @read.close
+      @write.close
+    end
+  end
+
   # Fail the current test if `block` hasn't finished after `span`.
   def self.with_timeout(span : Time::Span, &block)
     done = Channel(Exception?).new(1)
