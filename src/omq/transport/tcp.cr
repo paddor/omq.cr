@@ -62,6 +62,9 @@ module OMQ
         recv_capacity : Int32,
         mechanism : ZMTP::Mechanism = ZMTP::Mechanism::Null.new,
         max_message_size : Int64? = nil,
+        heartbeat_interval : Time::Span? = nil,
+        heartbeat_ttl : Time::Span? = nil,
+        heartbeat_timeout : Time::Span? = nil,
       ) : Pipe
         tcp.sync = false
         # Match libzmq/JeroMQ: disable Nagle so multi-write messages (frame
@@ -82,6 +85,14 @@ module OMQ
 
         spawn write_pump(zmtp, tx, rx, send_done)
         spawn read_pump(zmtp, rx, tx)
+        if interval = heartbeat_interval
+          spawn Transport.heartbeat_pump(
+            zmtp,
+            interval: interval,
+            ttl: heartbeat_ttl || interval,
+            silence_timeout: heartbeat_timeout || interval * 2,
+          )
+        end
 
         pipe = Pipe.new(tx: tx, rx: rx, send_done: send_done)
         if identity = zmtp.peer_properties["Identity"]?

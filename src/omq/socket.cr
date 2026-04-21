@@ -152,6 +152,9 @@ module OMQ
           recv_capacity: @options.recv_hwm,
           mechanism: @options.mechanism,
           max_message_size: @options.max_message_size,
+          heartbeat_interval: @options.heartbeat_interval,
+          heartbeat_ttl: @options.heartbeat_ttl,
+          heartbeat_timeout: @options.heartbeat_timeout,
         )
       when "ipc"
         unix = Transport::IPC.connect(endpoint)
@@ -164,6 +167,9 @@ module OMQ
           recv_capacity: @options.recv_hwm,
           mechanism: @options.mechanism,
           max_message_size: @options.max_message_size,
+          heartbeat_interval: @options.heartbeat_interval,
+          heartbeat_ttl: @options.heartbeat_ttl,
+          heartbeat_timeout: @options.heartbeat_timeout,
         )
       else
         raise UnsupportedTransport.new(scheme)
@@ -323,6 +329,9 @@ module OMQ
             recv_capacity: @options.recv_hwm,
             mechanism: @options.mechanism,
             max_message_size: @options.max_message_size,
+            heartbeat_interval: @options.heartbeat_interval,
+            heartbeat_ttl: @options.heartbeat_ttl,
+            heartbeat_timeout: @options.heartbeat_timeout,
           )
           register_pipe(pipe)
         rescue IO::Error | ProtocolError
@@ -346,6 +355,9 @@ module OMQ
             recv_capacity: @options.recv_hwm,
             mechanism: @options.mechanism,
             max_message_size: @options.max_message_size,
+            heartbeat_interval: @options.heartbeat_interval,
+            heartbeat_ttl: @options.heartbeat_ttl,
+            heartbeat_timeout: @options.heartbeat_timeout,
           )
           register_pipe(pipe)
         rescue IO::Error | ProtocolError

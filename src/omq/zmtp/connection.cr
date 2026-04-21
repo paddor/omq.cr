@@ -4,6 +4,18 @@ module OMQ::ZMTP
   class Connection
     getter peer_properties : Hash(String, Bytes) = {} of String => Bytes
 
+    # Wall-clock instant of the most recent successful wire-level read.
+    # Used by heartbeat pumps to decide when the peer has gone silent.
+    getter last_received_at : Time::Instant = Time.instant
+
+    # Reset the silence baseline. Heartbeat pumps call this at startup so
+    # handshake latency doesn't eat into the first silence window.
+    def touch_last_received : Nil
+      @last_received_at = Time.instant
+    end
+
+    @write_mutex = Mutex.new
+
     def initialize(
       @io : IO,
       @mechanism : Mechanism = Mechanism::Null.new,
@@ -35,11 +47,23 @@ module OMQ::ZMTP
 
     # Send one multipart message.
     def send_message(parts : Message) : Nil
-      last = parts.size - 1
-      parts.each_with_index do |part, i|
-        Frame.encode(@io, part, more: i < last)
+      @write_mutex.synchronize do
+        last = parts.size - 1
+        parts.each_with_index do |part, i|
+          Frame.encode(@io, part, more: i < last)
+        end
+        flush
       end
-      flush
+    end
+
+    # Fire-and-forget PING command. Peers are expected to respond with
+    # PONG; the reply bumps `last_received_at` via the normal read path.
+    def send_ping(ttl_deci : UInt16 = 0_u16, context : Bytes = Bytes.empty) : Nil
+      ping = Command.ping(ttl_deci, context)
+      @write_mutex.synchronize do
+        Frame.encode(@io, ping, command: true)
+        flush
+      end
     end
 
     # Read one multipart message. Returns nil on clean EOF.
@@ -49,6 +73,7 @@ module OMQ::ZMTP
         flags_byte = @io.read_byte
         return nil if flags_byte.nil? && parts.empty?
         raise ProtocolError.new("connection closed mid-message") if flags_byte.nil?
+        @last_received_at = Time.instant
 
         flags = flags_byte
         more = (flags & FLAG_MORE) != 0
@@ -89,8 +114,10 @@ module OMQ::ZMTP
       when "PING"
         _ttl, ctx = Command.parse_ping(body)
         pong = Command.pong(ctx)
-        Frame.encode(@io, pong, command: true)
-        flush
+        @write_mutex.synchronize do
+          Frame.encode(@io, pong, command: true)
+          flush
+        end
       when "PONG"
         # ignored; heartbeat logic owns the timing
       else
