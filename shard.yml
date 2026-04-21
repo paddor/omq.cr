@@ -1,0 +1,18 @@
+name: omq
+version: 0.1.0
+
+description: |
+  Pure-Crystal ZeroMQ (ZMTP 3.1). No context, no libzmq, no FFI.
+  Buffered channels for inproc, evented IO for TCP/IPC. Interoperable
+  with libzmq, pyzmq, CZMQ, and the Ruby omq gem.
+
+crystal: ">= 1.20.0"
+
+license: ISC
+
+authors:
+  - Patrik Wenger <paddor@gmail.com>
+
+development_dependencies:
+  minitest:
+    github: ysbaddaden/minitest.cr
