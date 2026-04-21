@@ -120,6 +120,12 @@ module OMQ
       @tcp_listeners.first?.try(&.port)
     end
 
+    # Number of live pipes — a rough peer count useful for benches and tests
+    # that want to wait until a handshake has completed.
+    def peer_count : Int32
+      @pipes.count { |p| !p.closed? }
+    end
+
     # Subclasses override to wire each pipe into their routing strategy.
     protected abstract def attach_pipe(pipe : Pipe) : Nil
 
