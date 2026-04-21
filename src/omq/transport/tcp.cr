@@ -64,6 +64,11 @@ module OMQ
         max_message_size : Int64? = nil,
       ) : Pipe
         tcp.sync = false
+        # Match libzmq/JeroMQ: disable Nagle so multi-write messages (frame
+        # header + payload as two buffered writes) don't stall on the
+        # delayed-ACK timer. Round-trip latency for ≥ ~32 KiB messages goes
+        # from ~90 ms to ~1 ms with NODELAY.
+        tcp.tcp_nodelay = true
         zmtp = ZMTP::Connection.new(tcp, mechanism, max_message_size)
         zmtp.handshake(
           local_socket_type: local_socket_type,
