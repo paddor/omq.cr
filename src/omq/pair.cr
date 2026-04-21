@@ -1,33 +1,67 @@
 module OMQ
-  # PAIR socket: exactly one peer, bidirectional, preserves message boundaries.
-  # Inproc-only in milestone 1; TCP/IPC to follow.
+  # PAIR socket: exactly one peer, bidirectional, preserves message
+  # boundaries. Works over inproc and TCP.
   class PAIR < Socket
     @@default_action = :bind
 
-    @pipe : Transport::Inproc::Pipe?
-    @pipe_ready : Channel(Transport::Inproc::Pipe)
-    @listener : Transport::Inproc::Listener?
-    @endpoint : String?
+    SOCKET_TYPE = "PAIR"
+
+    getter endpoint : String?
+    getter? bound : Bool = false
+
+    @pipe : Pipe?
+    @pipe_ready : Channel(Pipe)
+
+    # Track transport-specific state so `close` can tear it down.
+    @inproc_name : String?
+    @tcp_listener : Transport::TCP::Listener?
 
     def initialize(endpoint : String? = nil)
-      @pipe_ready = Channel(Transport::Inproc::Pipe).new(1)
+      @pipe_ready = Channel(Pipe).new(1)
       super(endpoint)
     end
 
     def bind(endpoint : String) : self
       scheme, rest = parse_endpoint(endpoint)
-      raise UnsupportedTransport.new(scheme) unless scheme == "inproc"
-      listener = Transport::Inproc.bind(rest)
-      @listener = listener
+      case scheme
+      when "inproc"
+        listener = Transport::Inproc.bind(rest)
+        @inproc_name = rest
+        spawn accept_one_inproc(listener)
+      when "tcp"
+        listener = Transport::TCP.bind(endpoint)
+        @tcp_listener = listener
+        rest_with_port = "#{scheme}://#{rest.sub(/:0$/, ":#{listener.port}")}"
+        spawn accept_one_tcp(listener)
+        endpoint = rest_with_port
+      else
+        raise UnsupportedTransport.new(scheme)
+      end
       @endpoint = endpoint
-      spawn accept_one(listener)
+      @bound = true
       self
     end
 
     def connect(endpoint : String) : self
       scheme, rest = parse_endpoint(endpoint)
-      raise UnsupportedTransport.new(scheme) unless scheme == "inproc"
-      pipe = Transport::Inproc.connect(rest, capacity: @options.recv_hwm)
+      pipe = case scheme
+             when "inproc"
+               Transport::Inproc.connect(rest, capacity: @options.recv_hwm)
+             when "tcp"
+               tcp = Transport::TCP.connect(endpoint)
+               Transport::TCP.adopt(
+                 tcp,
+                 local_socket_type: SOCKET_TYPE,
+                 local_identity: @options.identity,
+                 as_server: false,
+                 send_capacity: @options.send_hwm,
+                 recv_capacity: @options.recv_hwm,
+                 mechanism: @options.mechanism,
+                 max_message_size: @options.max_message_size,
+               )
+             else
+               raise UnsupportedTransport.new(scheme)
+             end
       attach_pipe(pipe)
       @endpoint = endpoint
       self
@@ -49,7 +83,6 @@ module OMQ
       send_frames(msg)
     end
 
-    # Chaining alias.
     def <<(msg) : self
       send(msg)
     end
@@ -67,12 +100,18 @@ module OMQ
       pipe.rx.receive?
     end
 
+    # Last-bound port for TCP listeners. `nil` if not bound over TCP.
+    def port : Int32?
+      @tcp_listener.try(&.port)
+    end
+
     def close : Nil
       return if @closed
       @closed = true
-      if listener = @listener
-        Transport::Inproc.unbind(listener.name)
+      if name = @inproc_name
+        Transport::Inproc.unbind(name)
       end
+      @tcp_listener.try(&.close)
       @pipe.try(&.close)
       @pipe_ready.close
     end
@@ -85,7 +124,7 @@ module OMQ
       raise ClosedError.new("socket closed while sending")
     end
 
-    private def await_pipe : Transport::Inproc::Pipe
+    private def await_pipe : Pipe
       if pipe = @pipe
         return pipe
       end
@@ -94,7 +133,7 @@ module OMQ
       pipe
     end
 
-    private def await_pipe? : Transport::Inproc::Pipe?
+    private def await_pipe? : Pipe?
       if pipe = @pipe
         return pipe
       end
@@ -103,16 +142,34 @@ module OMQ
       pipe
     end
 
-    private def attach_pipe(pipe : Transport::Inproc::Pipe) : Nil
+    private def attach_pipe(pipe : Pipe) : Nil
       @pipe_ready.send(pipe)
     rescue Channel::ClosedError
       pipe.close
     end
 
-    private def accept_one(listener : Transport::Inproc::Listener) : Nil
+    private def accept_one_inproc(listener : Transport::Inproc::Listener) : Nil
       if pipe = listener.incoming.receive?
         attach_pipe(pipe)
       end
+    end
+
+    private def accept_one_tcp(listener : Transport::TCP::Listener) : Nil
+      tcp = listener.accept
+      return unless tcp
+      pipe = Transport::TCP.adopt(
+        tcp,
+        local_socket_type: SOCKET_TYPE,
+        local_identity: @options.identity,
+        as_server: true,
+        send_capacity: @options.send_hwm,
+        recv_capacity: @options.recv_hwm,
+        mechanism: @options.mechanism,
+        max_message_size: @options.max_message_size,
+      )
+      attach_pipe(pipe)
+    rescue ex : IO::Error | ProtocolError
+      # handshake failed — listener fiber dies quietly
     end
   end
 end

@@ -37,6 +37,8 @@ module OMQ
 
     property on_mute : MuteStrategy = MuteStrategy::Block
 
+    property mechanism : ZMTP::Mechanism = ZMTP::Mechanism::Null.new
+
     def recv_timeout
       @read_timeout
     end

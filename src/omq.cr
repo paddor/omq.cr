@@ -5,9 +5,12 @@ require "./omq/zmtp/frame"
 require "./omq/zmtp/greeting"
 require "./omq/zmtp/command"
 require "./omq/zmtp/mechanism"
+require "./omq/zmtp/connection"
 require "./omq/options"
 require "./omq/socket"
+require "./omq/pipe"
 require "./omq/transport/inproc"
+require "./omq/transport/tcp"
 require "./omq/pair"
 
 # Pure-Crystal ZeroMQ (ZMTP 3.1). Interoperable with libzmq, pyzmq, CZMQ,
