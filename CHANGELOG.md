@@ -33,12 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   router_dealer, pair) with shared calibration, JSONL output, and
   regression reporter; cross-language comparison harness in
   `bench/scenarios/comparison/`
+- `Socket#monitor` — connection-lifecycle channel emitting
+  `Listening` / `Accepted` / `Connected` / `Disconnected` /
+  `ConnectDelayed` / `ConnectRetried` / `HandshakeFailed` / `Closed`
+  events; drop-on-full so a slow subscriber never stalls the socket
+- Cross-language interop tests under `test/system/` covering REQ/REP,
+  PUSH/PULL, PUB/SUB between Crystal OMQ and Ruby `omq` over TCP
 
 ### Not yet implemented
 
 - Draft socket types: CLIENT / SERVER, RADIO / DISH, SCATTER / GATHER,
   PEER, CHANNEL
 - CURVE mechanism (blocked on a Crystal libsodium wrapper)
-- Monitor-event channel (`Socket#monitor`)
-- Automated cross-language interop tests (manual verification only for
-  now)

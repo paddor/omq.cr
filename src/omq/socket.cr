@@ -14,12 +14,13 @@ module OMQ
     getter options : Options
     getter? closed : Bool = false
 
-    @inproc_names = [] of String
+    @inproc_names  = [] of String
     @tcp_listeners = [] of Transport::TCP::Listener
     @ipc_listeners = [] of Transport::IPC::Listener
-    @pipes = [] of Pipe
-    @committed = false
-    @shutdown = Channel(Nil).new
+    @pipes         = [] of Pipe
+    @committed     = false
+    @shutdown      = Channel(Nil).new
+    @monitor       : Channel(MonitorEvent)? = nil
 
     def initialize(endpoint : String? = nil)
       @options = Options.new
@@ -57,20 +58,24 @@ module OMQ
       when "inproc"
         listener = Transport::Inproc.bind(rest)
         @inproc_names << rest
-        spawn accept_inproc(listener)
+        emit_monitor(MonitorEvent::Kind::Listening, endpoint)
+        spawn accept_inproc(listener, endpoint)
       when "tcp"
         listener = Transport::TCP.bind(endpoint)
         @tcp_listeners << listener
-        spawn accept_tcp(listener)
+        emit_monitor(MonitorEvent::Kind::Listening, endpoint)
+        spawn accept_tcp(listener, endpoint)
       when "ipc"
         listener = Transport::IPC.bind(endpoint)
         @ipc_listeners << listener
-        spawn accept_ipc(listener)
+        emit_monitor(MonitorEvent::Kind::Listening, endpoint)
+        spawn accept_ipc(listener, endpoint)
       else
         raise UnsupportedTransport.new(scheme)
       end
       self
     end
+
 
     def connect(endpoint : String) : self
       commit_options
@@ -79,6 +84,7 @@ module OMQ
       when "inproc"
         pipe = Transport::Inproc.connect(rest, capacity: @options.recv_hwm, local_identity: @options.identity)
         register_pipe(pipe)
+        emit_monitor(MonitorEvent::Kind::Connected, endpoint)
       when "tcp", "ipc"
         # First attempt synchronously so a happy-path connect gives the
         # caller a usable pipe before returning. On failure, hand off to
@@ -86,8 +92,10 @@ module OMQ
         begin
           pipe = dial(scheme, endpoint)
           register_pipe(pipe)
+          emit_monitor(MonitorEvent::Kind::Connected, endpoint)
           spawn supervise_pipe(pipe, scheme, endpoint)
-        rescue IO::Error | ProtocolError
+        rescue err : IO::Error | ProtocolError
+          emit_monitor(MonitorEvent::Kind::ConnectDelayed, endpoint, err)
           spawn connection_manager(scheme, endpoint, initial_delay: nil)
         end
       else
@@ -95,6 +103,7 @@ module OMQ
       end
       self
     end
+
 
     def close : Nil
       return if @closed
@@ -105,7 +114,31 @@ module OMQ
       @ipc_listeners.each(&.close)
       drain_for_linger(@options.linger)
       @pipes.each(&.close)
+      emit_monitor(MonitorEvent::Kind::Closed, "")
+      @monitor.try(&.close)
       on_close
+    end
+
+
+    # Connection lifecycle subscription. Lazily creates a buffered channel
+    # on first access; drop-on-full semantics so a slow subscriber never
+    # stalls the socket. The channel is closed when the socket closes, so
+    # subscribers can iterate with `while ev = socket.monitor.receive?`.
+    def monitor(capacity : Int32 = 128) : Channel(MonitorEvent)
+      @monitor ||= Channel(MonitorEvent).new(capacity)
+    end
+
+
+    private def emit_monitor(kind : MonitorEvent::Kind, endpoint : String, error : Exception? = nil) : Nil
+      ch = @monitor
+      return unless ch
+      return if ch.closed?
+      ev = MonitorEvent.new(kind, endpoint, error)
+      select
+      when ch.send(ev)
+      else
+        # drop on full — subscriber too slow
+      end
     end
 
     # Supervises an already-attached pipe: waits until it terminates
@@ -114,8 +147,10 @@ module OMQ
       pipe.await_closed
       return if @closed
       @pipes.delete(pipe)
+      emit_monitor(MonitorEvent::Kind::Disconnected, endpoint)
       connection_manager(scheme, endpoint, initial_delay: nil)
     end
+
 
     # Retry loop for TCP/IPC: keeps dialing (with `reconnect_interval`
     # backoff) until a pipe succeeds, then supervises that pipe and loops
@@ -128,13 +163,16 @@ module OMQ
         break if @closed
         begin
           pipe = dial(scheme, endpoint)
-        rescue IO::Error | ProtocolError
+        rescue err : IO::Error | ProtocolError
+          emit_monitor(MonitorEvent::Kind::ConnectRetried, endpoint, err)
           next
         end
         register_pipe(pipe)
+        emit_monitor(MonitorEvent::Kind::Connected, endpoint)
         pipe.await_closed
         break if @closed
         @pipes.delete(pipe)
+        emit_monitor(MonitorEvent::Kind::Disconnected, endpoint)
         delay_hint = nil
       end
     end
@@ -311,14 +349,16 @@ module OMQ
       attach_pipe(pipe)
     end
 
-    private def accept_inproc(listener : Transport::Inproc::Listener) : Nil
+    private def accept_inproc(listener : Transport::Inproc::Listener, endpoint : String) : Nil
       while pipe = listener.incoming.receive?
         break if @closed
         register_pipe(pipe)
+        emit_monitor(MonitorEvent::Kind::Accepted, endpoint)
       end
     end
 
-    private def accept_tcp(listener : Transport::TCP::Listener) : Nil
+
+    private def accept_tcp(listener : Transport::TCP::Listener, endpoint : String) : Nil
       loop do
         tcp = listener.accept
         break unless tcp
@@ -340,13 +380,15 @@ module OMQ
             rcvbuf: @options.rcvbuf,
           )
           register_pipe(pipe)
-        rescue IO::Error | ProtocolError
-          # handshake failed; keep accepting
+          emit_monitor(MonitorEvent::Kind::Accepted, endpoint)
+        rescue err : IO::Error | ProtocolError
+          emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, err)
         end
       end
     end
 
-    private def accept_ipc(listener : Transport::IPC::Listener) : Nil
+
+    private def accept_ipc(listener : Transport::IPC::Listener, endpoint : String) : Nil
       loop do
         unix = listener.accept
         break unless unix
@@ -368,8 +410,9 @@ module OMQ
             rcvbuf: @options.rcvbuf,
           )
           register_pipe(pipe)
-        rescue IO::Error | ProtocolError
-          # handshake failed; keep accepting
+          emit_monitor(MonitorEvent::Kind::Accepted, endpoint)
+        rescue err : IO::Error | ProtocolError
+          emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, err)
         end
       end
     end
