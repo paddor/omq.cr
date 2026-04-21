@@ -1,4 +1,5 @@
 module OMQ
+
   # Bounded queue with non-blocking push that honors a drop policy when
   # full. Used by PUB/XPUB/RADIO fan-out per-peer queues so a slow
   # subscriber can't back-pressure the publisher.
@@ -14,9 +15,10 @@ module OMQ
   class DropQueue(T)
     getter? closed : Bool = false
 
+
     def initialize(@capacity : Int32, @strategy : Options::MuteStrategy)
-      @items = Deque(T).new
-      @mutex = Mutex.new
+      @items  = Deque(T).new
+      @mutex  = Mutex.new
       @signal = Channel(Nil).new(1)
     end
 
@@ -25,6 +27,7 @@ module OMQ
     def push(item : T) : Bool
       @mutex.synchronize do
         return false if @closed
+
         if @items.size >= @capacity
           case @strategy
           when Options::MuteStrategy::DropNewest
@@ -35,8 +38,10 @@ module OMQ
             raise "DropQueue#push called with Block strategy"
           end
         end
+
         @items << item
       end
+
       wake
       true
     end
@@ -49,9 +54,11 @@ module OMQ
           item = @items.shift?
           {item, @closed}
         end
+
         item, was_closed = val
         return item if item
         return nil if was_closed
+
         @signal.receive?
         return nil if @closed && @mutex.synchronize { @items.empty? }
       end

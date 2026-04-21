@@ -1,5 +1,6 @@
 module OMQ
   module Routing
+
     # PUB routing: fan-out to every connected peer.
     #
     # v0.1 does not yet negotiate SUBSCRIBE/CANCEL over the wire; every
@@ -11,28 +12,32 @@ module OMQ
     class Pub < Strategy
       getter tx : Channel(Message)
 
+
       # When on_mute is a drop strategy, each peer gets its own DropQueue
       # and a forwarder fiber draining into pipe.tx. In Block mode we
       # fan out to pipe.tx directly — the dispatcher blocks on any slow
       # peer, same as libzmq ZMQ_XPUB_NODROP.
       record PeerSlot, pipe : Pipe, drop : DropQueue(Message)?
 
+
       def initialize(capacity : Int32, @conflate : Bool = false, @on_mute : Options::MuteStrategy = Options::MuteStrategy::Block)
-        @tx = Channel(Message).new(capacity)
-        @peer_slots = [] of PeerSlot
+        @tx          = Channel(Message).new(capacity)
+        @peer_slots  = [] of PeerSlot
         @pipes_mutex = Mutex.new
-        @closed = false
-        @peer_hwm = capacity
+        @closed      = false
+        @peer_hwm    = capacity
       end
 
       # Called once on first bind/connect (via Socket's commit gate).
       # Installs the finalized @tx capacity and starts the dispatcher.
       def commit_capacity(send_hwm : Int32, recv_hwm : Int32, conflate : Bool, on_mute : Options::MuteStrategy) : Nil
         return if @closed
+
         @conflate = conflate
-        @on_mute = on_mute
+        @on_mute  = on_mute
         @peer_hwm = send_hwm
-        @tx = Channel(Message).new(send_hwm)
+        @tx       = Channel(Message).new(send_hwm)
+
         spawn dispatcher
       end
 
@@ -91,6 +96,7 @@ module OMQ
               end
             end
           end
+
           snapshot = @pipes_mutex.synchronize { @peer_slots.dup }
           snapshot.each do |slot|
             if drop = slot.drop
@@ -104,6 +110,7 @@ module OMQ
             end
           end
         end
+
       end
     end
   end

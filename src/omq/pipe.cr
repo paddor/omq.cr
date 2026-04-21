@@ -17,7 +17,27 @@ module OMQ
     # peer didn't advertise one; ROUTER will substitute a random ID.
     property peer_identity : Bytes = Bytes.empty
 
-    def initialize(@tx : Channel(Message), @rx : Channel(Message), @send_done : Channel(Nil) = Pipe.pre_closed_channel)
+
+    # Out-of-band channel for pre-encoded ZMTP commands (SUBSCRIBE/CANCEL).
+    # Only populated for TCP/IPC pipes — inproc doesn't speak ZMTP on the
+    # wire, so `#send_command` is a no-op there (pure-Crystal PUB/SUB
+    # filters locally and doesn't need wire-level subscriptions).
+    getter commands_tx : Channel(Bytes)? = nil
+
+
+    def initialize(@tx : Channel(Message), @rx : Channel(Message), @send_done : Channel(Nil) = Pipe.pre_closed_channel, @commands_tx : Channel(Bytes)? = nil)
+    end
+
+    # Best-effort send of a ZMTP command payload upstream. No-op if this
+    # pipe has no command channel or the channel is closed.
+    def send_command(payload : Bytes) : Nil
+      ch = @commands_tx
+      return unless ch
+      begin
+        ch.send(payload)
+      rescue Channel::ClosedError
+        # pipe went away — drop silently
+      end
     end
 
     protected def self.pre_closed_channel : Channel(Nil)

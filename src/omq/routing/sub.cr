@@ -1,19 +1,27 @@
 module OMQ
   module Routing
+
     # SUB routing: one drain fiber per pipe, matching the message's first
     # frame (topic) against the subscription prefix list before forwarding
     # to the app.
     #
-    # Empty prefix matches every message. See `Pub` for the note on why
-    # filtering lives on the SUB side in v0.1.
+    # `#subscribe` is two things at once: (1) it installs a local filter
+    # so non-matching frames are dropped on arrival, and (2) it pushes
+    # a ZMTP 3.0-legacy subscribe frame (`\x01prefix`) to every peer so
+    # libzmq/ruby-omq PUBs — which filter upstream — actually send us
+    # matching traffic. New pipes get every current subscription replayed
+    # at attach time.
     class Sub < Strategy
       getter rx : Channel(Message)
 
+
       def initialize(capacity : Int32)
-        @rx = Channel(Message).new(capacity)
-        @prefixes = [] of Bytes
+        @rx             = Channel(Message).new(capacity)
+        @prefixes       = [] of Bytes
         @prefixes_mutex = Mutex.new
-        @closed = false
+        @pipes          = [] of Pipe
+        @pipes_mutex    = Mutex.new
+        @closed         = false
       end
 
       def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
@@ -23,18 +31,31 @@ module OMQ
 
       def subscribe(prefix : Bytes) : Nil
         @prefixes_mutex.synchronize do
-          @prefixes << prefix unless @prefixes.any? { |p| p == prefix }
+          return if @prefixes.any? { |p| p == prefix }
+          @prefixes << prefix
         end
+        broadcast_marker(0x01_u8, prefix)
       end
 
       def unsubscribe(prefix : Bytes) : Nil
         @prefixes_mutex.synchronize do
+          return unless @prefixes.any? { |p| p == prefix }
           @prefixes.reject! { |p| p == prefix }
         end
+        broadcast_marker(0x00_u8, prefix)
       end
 
       def attach(pipe : Pipe) : Nil
         return if @closed
+        @pipes_mutex.synchronize { @pipes << pipe }
+
+        # Replay current subscriptions so the new peer knows which
+        # topics to forward.
+        snapshot = @prefixes_mutex.synchronize { @prefixes.dup }
+        snapshot.each do |prefix|
+          send_to(pipe, 0x01_u8, prefix)
+        end
+
         spawn drain(pipe)
       end
 
@@ -42,6 +63,16 @@ module OMQ
         return if @closed
         @closed = true
         @rx.close
+      end
+
+      private def broadcast_marker(marker : UInt8, prefix : Bytes) : Nil
+        snapshot = @pipes_mutex.synchronize { @pipes.dup }
+        snapshot.each { |pipe| send_to(pipe, marker, prefix) }
+      end
+
+      private def send_to(pipe : Pipe, marker : UInt8, prefix : Bytes) : Nil
+        cmd = marker == 0x01_u8 ? ZMTP::Command.subscribe(prefix) : ZMTP::Command.cancel(prefix)
+        pipe.send_command(cmd)
       end
 
       private def drain(pipe : Pipe) : Nil

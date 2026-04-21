@@ -83,11 +83,12 @@ module OMQ
           as_server: as_server,
         )
 
-        tx = Channel(Message).new(send_capacity)
-        rx = Channel(Message).new(recv_capacity)
-        send_done = Channel(Nil).new
+        tx          = Channel(Message).new(send_capacity)
+        rx          = Channel(Message).new(recv_capacity)
+        commands_tx = Channel(Bytes).new(send_capacity)
+        send_done   = Channel(Nil).new
 
-        spawn write_pump(zmtp, tx, rx, send_done)
+        spawn write_pump(zmtp, tx, rx, commands_tx, send_done)
         spawn read_pump(zmtp, rx, tx)
         if interval = heartbeat_interval
           spawn Transport.heartbeat_pump(
@@ -98,26 +99,32 @@ module OMQ
           )
         end
 
-        pipe = Pipe.new(tx: tx, rx: rx, send_done: send_done)
+        pipe = Pipe.new(tx: tx, rx: rx, send_done: send_done, commands_tx: commands_tx)
         if identity = zmtp.peer_properties["Identity"]?
           pipe.peer_identity = identity
         end
         pipe
       end
 
-      # Drain `tx` and write each message to the wire. Closes `send_done`
-      # on exit so `Pipe#await_drained` can observe when the outgoing
-      # queue has been fully flushed (or the wire has gone away).
-      private def write_pump(zmtp : ZMTP::Connection, tx : Channel(Message), rx : Channel(Message), send_done : Channel(Nil)) : Nil
-        while msg = tx.receive?
-          zmtp.send_message(msg)
+      # Drain `tx` and `commands_tx` and write each to the wire. Closes
+      # `send_done` on exit so `Pipe#await_drained` can observe when the
+      # outgoing queue has been fully flushed (or the wire has gone away).
+      private def write_pump(zmtp : ZMTP::Connection, tx : Channel(Message), rx : Channel(Message), commands_tx : Channel(Bytes), send_done : Channel(Nil)) : Nil
+        loop do
+          select
+          when msg = tx.receive
+            zmtp.send_message(msg)
+          when cmd = commands_tx.receive
+            zmtp.send_command(cmd)
+          end
         end
-      rescue IO::Error | ProtocolError
-        # peer gone — shut the pipe ends
+      rescue Channel::ClosedError | IO::Error | ProtocolError
+        # one side closed or peer gone — tear down
       ensure
         send_done.close
         tx.close
         rx.close
+        commands_tx.close
         zmtp.close
       end
 

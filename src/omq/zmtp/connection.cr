@@ -66,6 +66,15 @@ module OMQ::ZMTP
       end
     end
 
+    # Send a pre-encoded ZMTP command payload (name-length + name + body).
+    # Used by SUB for SUBSCRIBE/CANCEL.
+    def send_command(payload : Bytes) : Nil
+      @write_mutex.synchronize do
+        Frame.encode(@io, payload, command: true)
+        flush
+      end
+    end
+
     # Read one multipart message. Returns nil on clean EOF.
     def receive_message : Message?
       parts = Message.new
@@ -120,8 +129,11 @@ module OMQ::ZMTP
         end
       when "PONG"
         # ignored; heartbeat logic owns the timing
+      when "SUBSCRIBE", "CANCEL"
+        # v0.1 PUB broadcasts everything and filters on the SUB side, so
+        # these are silent no-ops. Keeps interop with libzmq/ruby-omq
+        # SUBs that send real wire-level subscribe commands.
       else
-        # SUBSCRIBE/CANCEL/JOIN/LEAVE bubble up via the engine, not here
         raise ProtocolError.new("unhandled in-band command: #{name}")
       end
     end

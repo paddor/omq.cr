@@ -1,11 +1,15 @@
 module OMQ
+
   # PUB: write-only, fans out every message to every connected SUB peer.
   class PUB < Socket
     @@default_action = :bind
 
+
     SOCKET_TYPE = "PUB"
 
+
     @strategy : Routing::Pub
+
 
     def initialize(endpoint : String? = nil)
       @strategy = Routing::Pub.new(Options::DEFAULT_HWM)
@@ -64,9 +68,12 @@ module OMQ
   class XPUB < Socket
     @@default_action = :bind
 
+
     SOCKET_TYPE = "XPUB"
 
+
     @strategy : Routing::XPub
+
 
     def initialize(endpoint : String? = nil)
       @strategy = Routing::XPub.new(Options::DEFAULT_HWM)
@@ -136,9 +143,12 @@ module OMQ
   class XSUB < Socket
     @@default_action = :connect
 
+
     SOCKET_TYPE = "XSUB"
 
+
     @strategy : Routing::XSub
+
 
     def initialize(endpoint : String? = nil)
       @strategy = Routing::XSub.new(Options::DEFAULT_HWM)
@@ -228,9 +238,12 @@ module OMQ
   class SUB < Socket
     @@default_action = :connect
 
+
     SOCKET_TYPE = "SUB"
 
+
     @strategy : Routing::Sub
+
 
     def initialize(endpoint : String? = nil)
       @strategy = Routing::Sub.new(Options::DEFAULT_HWM)
