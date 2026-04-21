@@ -68,7 +68,7 @@ module OMQ
       scheme, rest = parse_endpoint(endpoint)
       pipe = case scheme
              when "inproc"
-               Transport::Inproc.connect(rest, capacity: @options.recv_hwm)
+               Transport::Inproc.connect(rest, capacity: @options.recv_hwm, local_identity: @options.identity)
              when "tcp"
                tcp = Transport::TCP.connect(endpoint)
                Transport::TCP.adopt(

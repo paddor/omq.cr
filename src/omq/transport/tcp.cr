@@ -77,7 +77,11 @@ module OMQ
         spawn write_pump(zmtp, tx, rx)
         spawn read_pump(zmtp, rx, tx)
 
-        Pipe.new(tx: tx, rx: rx)
+        pipe = Pipe.new(tx: tx, rx: rx)
+        if identity = zmtp.peer_properties["Identity"]?
+          pipe.peer_identity = identity
+        end
+        pipe
       end
 
       # Drain `tx` and write each message to the wire.

@@ -1,0 +1,50 @@
+module OMQ
+  module Routing
+    # DEALER routing: work-stealing send (one pump fiber per peer racing
+    # to drain a shared tx channel) + fair-queue receive (one drain fiber
+    # per peer fanning into a shared rx channel). No envelope manipulation.
+    class Dealer < Strategy
+      getter tx : Channel(Message)
+      getter rx : Channel(Message)
+
+      def initialize(tx_capacity : Int32, rx_capacity : Int32)
+        @tx = Channel(Message).new(tx_capacity)
+        @rx = Channel(Message).new(rx_capacity)
+        @closed = false
+      end
+
+      def attach(pipe : Pipe) : Nil
+        return if @closed
+        spawn send_pump(pipe)
+        spawn recv_pump(pipe)
+      end
+
+      def close : Nil
+        return if @closed
+        @closed = true
+        @tx.close
+        @rx.close
+      end
+
+      private def send_pump(pipe : Pipe) : Nil
+        while msg = @tx.receive?
+          begin
+            pipe.tx.send(msg)
+          rescue Channel::ClosedError
+            break
+          end
+        end
+      end
+
+      private def recv_pump(pipe : Pipe) : Nil
+        while msg = pipe.rx.receive?
+          begin
+            @rx.send(msg)
+          rescue Channel::ClosedError
+            break
+          end
+        end
+      end
+    end
+  end
+end

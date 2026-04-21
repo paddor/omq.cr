@@ -7,6 +7,10 @@ module OMQ
   class Pipe
     getter tx : Channel(Message)
     getter rx : Channel(Message)
+    # Identity the *remote* peer advertised (via ZMTP handshake for TCP,
+    # via the connector's options.identity for inproc). Empty means the
+    # peer didn't advertise one; ROUTER will substitute a random ID.
+    property peer_identity : Bytes = Bytes.empty
 
     def initialize(@tx : Channel(Message), @rx : Channel(Message))
     end

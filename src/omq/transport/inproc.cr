@@ -52,11 +52,12 @@ module OMQ
         @@mutex.synchronize { @@listeners[name]? }
       end
 
-      def connect(name : String, capacity : Int32) : Pipe
+      def connect(name : String, capacity : Int32, local_identity : Bytes = Bytes.empty) : Pipe
         listener = lookup(name) || raise InvalidEndpoint.new(
           "inproc://#{name} not bound (no listener)"
         )
         local, remote = Pipe.pair(capacity)
+        remote.peer_identity = local_identity
         listener.incoming.send(remote)
         local
       end
