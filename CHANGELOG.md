@@ -38,7 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `ConnectDelayed` / `ConnectRetried` / `HandshakeFailed` / `Closed`
   events; drop-on-full so a slow subscriber never stalls the socket
 - Cross-language interop tests under `test/system/` covering REQ/REP,
-  PUSH/PULL, PUB/SUB between Crystal OMQ and Ruby `omq` over TCP
+  PUSH/PULL, PUB/SUB, and every draft type (CLIENT/SERVER, PEER,
+  CHANNEL, SCATTER/GATHER, RADIO/DISH) between Crystal OMQ and
+  Ruby `omq` over TCP
 - Draft socket types (opt-in via `require "omq/<name>"`):
   CLIENT / SERVER (RFC 41), RADIO / DISH (RFC 48),
   SCATTER / GATHER (RFC 49), PEER (RFC 51), CHANNEL (RFC 52).

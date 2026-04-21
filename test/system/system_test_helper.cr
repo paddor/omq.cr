@@ -4,20 +4,15 @@ require "../../src/omq"
 
 module OMQ::SystemTestHelper
 
-  # Ruby interpreter + paths searched for the `omq` gem. Overridable via
-  # OMQ_RUBY_BIN so CI can point at whatever install is on the box.
-  RUBY_CANDIDATES = [
-    ENV["OMQ_RUBY_BIN"]?,
-    "#{ENV["HOME"]}/.rubies/ruby-4.0.2/bin/ruby",
-    "#{ENV["HOME"]}/.rubies/ruby-3.3.10/bin/ruby",
-    "ruby",
-  ].compact
+  # Ruby interpreter. Overridable via OMQ_RUBY_BIN; otherwise `ruby`
+  # is resolved from PATH.
+  RUBY_BIN = ENV["OMQ_RUBY_BIN"]? || "ruby"
 
 
   SCRIPTS_DIR = File.expand_path("scripts", __DIR__)
 
 
-  # Cached ruby path (nil = not located / gem missing).
+  # Cached ruby path (nil = `ruby` can't load the `omq` gem).
   @@ruby_bin : String? = nil
   @@probed = false
 
@@ -25,14 +20,12 @@ module OMQ::SystemTestHelper
   def self.ruby_bin : String?
     return @@ruby_bin if @@probed
     @@probed = true
-    RUBY_CANDIDATES.each do |candidate|
-      next unless candidate && File.exists?(candidate)
-      output = IO::Memory.new
-      status = Process.run(candidate, ["-r", "omq", "-e", "print OMQ::VERSION"], output: output, error: Process::Redirect::Close)
-      if status.success? && !output.to_s.empty?
-        return @@ruby_bin = candidate
-      end
+    output = IO::Memory.new
+    status = Process.run(RUBY_BIN, ["-r", "omq", "-e", "print OMQ::VERSION"], output: output, error: Process::Redirect::Close)
+    if status.success? && !output.to_s.empty?
+      @@ruby_bin = RUBY_BIN
     end
+  rescue
     nil
   end
 
