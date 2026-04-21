@@ -12,6 +12,10 @@ module OMQ
       super(endpoint)
     end
 
+    protected def on_commit_options : Nil
+      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm)
+    end
+
     def send(msg : String) : self
       send_frames([msg.to_slice])
     end
@@ -45,7 +49,7 @@ module OMQ
     end
 
     private def send_frames(frames : Message) : self
-      @strategy.tx.send(frames)
+      channel_send(@strategy.tx, frames)
       self
     rescue Channel::ClosedError
       raise ClosedError.new("socket closed while sending")
@@ -65,6 +69,10 @@ module OMQ
     def initialize(endpoint : String? = nil)
       @strategy = Routing::Sub.new(Options::DEFAULT_HWM)
       super(endpoint)
+    end
+
+    protected def on_commit_options : Nil
+      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm)
     end
 
     def subscribe(prefix : String = "") : self
@@ -88,7 +96,7 @@ module OMQ
     end
 
     def receive : Message
-      @strategy.rx.receive
+      channel_receive(@strategy.rx)
     rescue Channel::ClosedError
       raise ClosedError.new("socket closed while receiving")
     end

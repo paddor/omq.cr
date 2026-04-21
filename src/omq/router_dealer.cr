@@ -13,6 +13,10 @@ module OMQ
       super(endpoint)
     end
 
+    protected def on_commit_options : Nil
+      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm)
+    end
+
     def send(msg : String) : self
       send_frames([msg.to_slice])
     end
@@ -34,7 +38,7 @@ module OMQ
     end
 
     def receive : Message
-      @strategy.rx.receive
+      channel_receive(@strategy.rx)
     rescue Channel::ClosedError
       raise ClosedError.new("socket closed while receiving")
     end
@@ -56,7 +60,7 @@ module OMQ
     end
 
     private def send_frames(frames : Message) : self
-      @strategy.tx.send(frames)
+      channel_send(@strategy.tx, frames)
       self
     rescue Channel::ClosedError
       raise ClosedError.new("socket closed while sending")
@@ -79,6 +83,10 @@ module OMQ
       super(endpoint)
     end
 
+    protected def on_commit_options : Nil
+      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm)
+    end
+
     def send(msg : Array(Bytes)) : self
       send_frames(msg)
     end
@@ -92,7 +100,7 @@ module OMQ
     end
 
     def receive : Message
-      @strategy.rx.receive
+      channel_receive(@strategy.rx)
     rescue Channel::ClosedError
       raise ClosedError.new("socket closed while receiving")
     end
@@ -118,7 +126,7 @@ module OMQ
       if @options.router_mandatory? && @strategy.route?(frames[0]).nil?
         raise Error.new("no route to identity #{frames[0].inspect}")
       end
-      @strategy.tx.send(frames)
+      channel_send(@strategy.tx, frames)
       self
     rescue Channel::ClosedError
       raise ClosedError.new("socket closed while sending")

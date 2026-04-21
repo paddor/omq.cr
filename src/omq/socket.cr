@@ -18,6 +18,7 @@ module OMQ
     @tcp_listeners = [] of Transport::TCP::Listener
     @ipc_listeners = [] of Transport::IPC::Listener
     @pipes = [] of Pipe
+    @committed = false
 
     def initialize(endpoint : String? = nil)
       @options = Options.new
@@ -49,6 +50,7 @@ module OMQ
     end
 
     def bind(endpoint : String) : self
+      commit_options
       scheme, rest = parse_endpoint(endpoint)
       case scheme
       when "inproc"
@@ -70,6 +72,7 @@ module OMQ
     end
 
     def connect(endpoint : String) : self
+      commit_options
       scheme, rest = parse_endpoint(endpoint)
       pipe = case scheme
              when "inproc"
@@ -146,6 +149,35 @@ module OMQ
       @pipes.count { |p| !p.closed? }
     end
 
+    # Send `msg` on `channel`, raising `IO::TimeoutError` if the socket's
+    # `write_timeout` elapses first. `nil` timeout = block forever.
+    protected def channel_send(channel : Channel(Message), msg : Message) : Nil
+      if span = @options.write_timeout
+        select
+        when channel.send(msg)
+        when timeout(span)
+          raise IO::TimeoutError.new("send timed out after #{span}")
+        end
+      else
+        channel.send(msg)
+      end
+    end
+
+    # Receive from `channel`, raising `IO::TimeoutError` if the socket's
+    # `read_timeout` elapses first. `nil` timeout = block forever.
+    protected def channel_receive(channel : Channel(Message)) : Message
+      if span = @options.read_timeout
+        select
+        when msg = channel.receive
+          msg
+        when timeout(span)
+          raise IO::TimeoutError.new("receive timed out after #{span}")
+        end
+      else
+        channel.receive
+      end
+    end
+
     # Subclasses override to wire each pipe into their routing strategy.
     protected abstract def attach_pipe(pipe : Pipe) : Nil
 
@@ -163,6 +195,19 @@ module OMQ
 
     # Subclasses with a send-side strategy override to expose its drain.
     protected def await_strategy_drain(span : Time::Span?) : Nil
+    end
+
+    # Runs once, on the first bind/connect. Subclasses rebuild their
+    # strategy channels here using the finalized `@options` (e.g. HWMs),
+    # so `socket.send_hwm = 1` between `.new` and `.bind` actually takes
+    # effect.
+    protected def on_commit_options : Nil
+    end
+
+    private def commit_options : Nil
+      return if @committed
+      @committed = true
+      on_commit_options
     end
 
     protected def parse_endpoint(endpoint : String) : {String, String}

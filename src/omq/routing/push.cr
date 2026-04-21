@@ -16,6 +16,11 @@ module OMQ
         @pumps = WaitGroup.new
       end
 
+      def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
+        return if @closed
+        @tx = Channel(Message).new(send_hwm)
+      end
+
       def attach(pipe : Pipe) : Nil
         return if @closed
         @pumps.spawn { pump(pipe) }

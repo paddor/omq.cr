@@ -16,6 +16,11 @@ module OMQ
         @closed = false
       end
 
+      def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
+        return if @closed
+        @rx = Channel(Message).new(recv_hwm)
+      end
+
       def subscribe(prefix : Bytes) : Nil
         @prefixes_mutex.synchronize do
           @prefixes << prefix unless @prefixes.any? { |p| p == prefix }

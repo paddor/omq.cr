@@ -35,8 +35,8 @@ module OMQ
     end
 
     def receive : Message
-      pipe = await_pipe
-      pipe.rx.receive
+      pipe = await_pipe(@options.read_timeout)
+      channel_receive(pipe.rx)
     rescue Channel::ClosedError
       raise ClosedError.new("socket closed while receiving")
     end
@@ -67,18 +67,27 @@ module OMQ
     end
 
     private def send_frames(frames : Message) : self
-      pipe = await_pipe
-      pipe.tx.send(frames)
+      pipe = await_pipe(@options.write_timeout)
+      channel_send(pipe.tx, frames)
       self
     rescue Channel::ClosedError
       raise ClosedError.new("socket closed while sending")
     end
 
-    private def await_pipe : Pipe
+    private def await_pipe(timeout span : Time::Span? = nil) : Pipe
       if pipe = @pipe
         return pipe
       end
-      pipe = @pipe_ready.receive
+      pipe = if span
+               select
+               when p = @pipe_ready.receive
+                 p
+               when timeout(span)
+                 raise IO::TimeoutError.new("no peer connected after #{span}")
+               end
+             else
+               @pipe_ready.receive
+             end
       @pipe = pipe
       pipe
     end

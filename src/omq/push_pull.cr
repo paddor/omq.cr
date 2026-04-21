@@ -36,6 +36,10 @@ module OMQ
       SOCKET_TYPE
     end
 
+    protected def on_commit_options : Nil
+      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm)
+    end
+
     protected def attach_pipe(pipe : Pipe) : Nil
       @strategy.attach(pipe)
     end
@@ -53,7 +57,7 @@ module OMQ
     end
 
     private def send_frames(frames : Message) : self
-      @strategy.tx.send(frames)
+      channel_send(@strategy.tx, frames)
       self
     rescue Channel::ClosedError
       raise ClosedError.new("socket closed while sending")
@@ -74,8 +78,12 @@ module OMQ
       super(endpoint)
     end
 
+    protected def on_commit_options : Nil
+      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm)
+    end
+
     def receive : Message
-      @strategy.rx.receive
+      channel_receive(@strategy.rx)
     rescue Channel::ClosedError
       raise ClosedError.new("socket closed while receiving")
     end

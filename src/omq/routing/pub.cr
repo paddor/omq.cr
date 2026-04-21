@@ -19,6 +19,13 @@ module OMQ
         spawn dispatcher
       end
 
+      def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
+        return if @closed
+        @tx.close
+        @tx = Channel(Message).new(send_hwm)
+        spawn dispatcher
+      end
+
       def attach(pipe : Pipe) : Nil
         return if @closed
         @pipes_mutex.synchronize { @pipes << pipe }

@@ -21,6 +21,14 @@ module OMQ
         spawn dispatcher
       end
 
+      def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
+        return if @closed
+        @tx.close
+        @rx = Channel({Pipe, Message, Message}).new(recv_hwm)
+        @tx = Channel(Message).new(send_hwm)
+        spawn dispatcher
+      end
+
       def attach(pipe : Pipe) : Nil
         return if @closed
         spawn recv_pump(pipe)
@@ -39,6 +47,18 @@ module OMQ
         body
       end
 
+      def receive(timeout span : Time::Span?) : Message
+        return receive unless span
+        select
+        when triple = @rx.receive
+          pipe, envelope, body = triple
+          @current = {pipe, envelope}
+          body
+        when timeout(span)
+          raise IO::TimeoutError.new("receive timed out after #{span}")
+        end
+      end
+
       def receive? : Message?
         triple = @rx.receive?
         return nil unless triple
@@ -49,6 +69,15 @@ module OMQ
 
       def send(msg : Message) : Nil
         @tx.send(msg)
+      end
+
+      def send(msg : Message, timeout span : Time::Span?) : Nil
+        return send(msg) unless span
+        select
+        when @tx.send(msg)
+        when timeout(span)
+          raise IO::TimeoutError.new("send timed out after #{span}")
+        end
       end
 
       private def recv_pump(pipe : Pipe) : Nil

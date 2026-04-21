@@ -19,6 +19,12 @@ module OMQ
         @closed = false
       end
 
+      def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
+        return if @closed
+        @tx = Channel(Message).new(send_hwm)
+        @rx = Channel(Message).new(recv_hwm)
+      end
+
       def attach(pipe : Pipe) : Nil
         return if @closed
         spawn send_pump(pipe)

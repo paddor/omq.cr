@@ -21,6 +21,14 @@ module OMQ
         spawn dispatcher
       end
 
+      def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
+        return if @closed
+        @tx.close
+        @tx = Channel(Message).new(send_hwm)
+        @rx = Channel(Message).new(recv_hwm)
+        spawn dispatcher
+      end
+
       def attach(pipe : Pipe) : Nil
         return if @closed
         identity = pipe.peer_identity
