@@ -5,7 +5,7 @@ describe "PUB on_mute" do
     OMQ::TestHelper.with_timeout(2.seconds) do
       pub = OMQ::PUB.new
       pub.send_hwm = 8
-      pub.on_mute = OMQ::Options::MuteStrategy::DropNewest
+      pub.on_mute = :drop_newest
       pub.bind("inproc://drop-newest")
 
       sub = OMQ::SUB.new
@@ -43,7 +43,7 @@ describe "PUB on_mute" do
     OMQ::TestHelper.with_timeout(2.seconds) do
       pub = OMQ::PUB.new
       pub.send_hwm = 8
-      pub.on_mute = OMQ::Options::MuteStrategy::DropOldest
+      pub.on_mute = :drop_oldest
       pub.bind("inproc://drop-oldest")
 
       sub = OMQ::SUB.new

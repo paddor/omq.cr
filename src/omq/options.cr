@@ -63,5 +63,11 @@ module OMQ
     def identity=(val : Bytes)
       @identity = val
     end
+
+    # Symbol → MuteStrategy shim so `on_mute = :drop_newest` works, the
+    # idiomatic Ruby-OMQ spelling.
+    def on_mute=(val : Symbol)
+      @on_mute = MuteStrategy.parse(val.to_s)
+    end
   end
 end
