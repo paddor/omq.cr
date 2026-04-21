@@ -18,12 +18,10 @@ module OMQ
         @pipes_by_id = {} of Bytes => Pipe
         @mutex = Mutex.new
         @closed = false
-        spawn dispatcher
       end
 
       def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
         return if @closed
-        @tx.close
         @tx = Channel(Message).new(send_hwm)
         @rx = Channel(Message).new(recv_hwm)
         spawn dispatcher

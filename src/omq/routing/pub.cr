@@ -11,17 +11,18 @@ module OMQ
     class Pub < Strategy
       getter tx : Channel(Message)
 
-      def initialize(capacity : Int32)
+      def initialize(capacity : Int32, @conflate : Bool = false)
         @tx = Channel(Message).new(capacity)
         @pipes = [] of Pipe
         @pipes_mutex = Mutex.new
         @closed = false
-        spawn dispatcher
       end
 
-      def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
+      # Called once on first bind/connect (via Socket's commit gate).
+      # Installs the finalized @tx capacity and starts the dispatcher.
+      def commit_capacity(send_hwm : Int32, recv_hwm : Int32, conflate : Bool) : Nil
         return if @closed
-        @tx.close
+        @conflate = conflate
         @tx = Channel(Message).new(send_hwm)
         spawn dispatcher
       end
@@ -39,6 +40,19 @@ module OMQ
 
       private def dispatcher : Nil
         while msg = @tx.receive?
+          if @conflate
+            # Conflate: drain any further queued messages non-blockingly
+            # and keep only the most recent one. Stale updates get dropped
+            # so slow subscribers see only the latest state, not backlog.
+            loop do
+              select
+              when newer = @tx.receive
+                msg = newer
+              else
+                break
+              end
+            end
+          end
           snapshot = @pipes_mutex.synchronize { @pipes.dup }
           snapshot.each do |pipe|
             begin

@@ -18,12 +18,10 @@ module OMQ
         @tx = Channel(Message).new(tx_capacity)
         @current = nil
         @closed = false
-        spawn dispatcher
       end
 
       def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
         return if @closed
-        @tx.close
         @rx = Channel({Pipe, Message, Message}).new(recv_hwm)
         @tx = Channel(Message).new(send_hwm)
         spawn dispatcher
