@@ -19,11 +19,12 @@ module OMQ
 
     getter kind : Kind
     getter endpoint : String
+    getter pipe : Pipe?
     getter error : Exception?
     getter at : Time
 
 
-    def initialize(@kind : Kind, @endpoint : String, @error : Exception? = nil)
+    def initialize(@kind : Kind, @endpoint : String, @pipe : Pipe? = nil, @error : Exception? = nil)
       @at = Time.utc
     end
   end

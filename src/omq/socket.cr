@@ -84,7 +84,7 @@ module OMQ
       when "inproc"
         pipe = Transport::Inproc.connect(rest, capacity: @options.recv_hwm, local_identity: @options.identity)
         register_pipe(pipe)
-        emit_monitor(MonitorEvent::Kind::Connected, endpoint)
+        emit_monitor(MonitorEvent::Kind::Connected, endpoint, pipe)
       when "tcp", "ipc"
         # First attempt synchronously so a happy-path connect gives the
         # caller a usable pipe before returning. On failure, hand off to
@@ -92,10 +92,10 @@ module OMQ
         begin
           pipe = dial(scheme, endpoint)
           register_pipe(pipe)
-          emit_monitor(MonitorEvent::Kind::Connected, endpoint)
+          emit_monitor(MonitorEvent::Kind::Connected, endpoint, pipe)
           spawn supervise_pipe(pipe, scheme, endpoint)
         rescue err : IO::Error | ProtocolError
-          emit_monitor(MonitorEvent::Kind::ConnectDelayed, endpoint, err)
+          emit_monitor(MonitorEvent::Kind::ConnectDelayed, endpoint, error: err)
           spawn connection_manager(scheme, endpoint, initial_delay: nil)
         end
       else
@@ -129,11 +129,11 @@ module OMQ
     end
 
 
-    private def emit_monitor(kind : MonitorEvent::Kind, endpoint : String, error : Exception? = nil) : Nil
+    private def emit_monitor(kind : MonitorEvent::Kind, endpoint : String, pipe : Pipe? = nil, error : Exception? = nil) : Nil
       ch = @monitor
       return unless ch
       return if ch.closed?
-      ev = MonitorEvent.new(kind, endpoint, error)
+      ev = MonitorEvent.new(kind, endpoint, pipe, error)
       select
       when ch.send(ev)
       else
@@ -147,7 +147,7 @@ module OMQ
       pipe.await_closed
       return if @closed
       @pipes.delete(pipe)
-      emit_monitor(MonitorEvent::Kind::Disconnected, endpoint)
+      emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe)
       connection_manager(scheme, endpoint, initial_delay: nil)
     end
 
@@ -164,15 +164,15 @@ module OMQ
         begin
           pipe = dial(scheme, endpoint)
         rescue err : IO::Error | ProtocolError
-          emit_monitor(MonitorEvent::Kind::ConnectRetried, endpoint, err)
+          emit_monitor(MonitorEvent::Kind::ConnectRetried, endpoint, error: err)
           next
         end
         register_pipe(pipe)
-        emit_monitor(MonitorEvent::Kind::Connected, endpoint)
+        emit_monitor(MonitorEvent::Kind::Connected, endpoint, pipe)
         pipe.await_closed
         break if @closed
         @pipes.delete(pipe)
-        emit_monitor(MonitorEvent::Kind::Disconnected, endpoint)
+        emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe)
         delay_hint = nil
       end
     end
@@ -353,7 +353,7 @@ module OMQ
       while pipe = listener.incoming.receive?
         break if @closed
         register_pipe(pipe)
-        emit_monitor(MonitorEvent::Kind::Accepted, endpoint)
+        emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
       end
     end
 
@@ -380,9 +380,9 @@ module OMQ
             rcvbuf: @options.rcvbuf,
           )
           register_pipe(pipe)
-          emit_monitor(MonitorEvent::Kind::Accepted, endpoint)
+          emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
         rescue err : IO::Error | ProtocolError
-          emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, err)
+          emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err)
         end
       end
     end
@@ -410,9 +410,9 @@ module OMQ
             rcvbuf: @options.rcvbuf,
           )
           register_pipe(pipe)
-          emit_monitor(MonitorEvent::Kind::Accepted, endpoint)
+          emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
         rescue err : IO::Error | ProtocolError
-          emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, err)
+          emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err)
         end
       end
     end

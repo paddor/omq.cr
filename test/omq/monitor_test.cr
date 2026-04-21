@@ -12,9 +12,11 @@ describe "Socket#monitor" do
       listening = events.receive
       assert_equal OMQ::MonitorEvent::Kind::Listening, listening.kind
       assert_equal "inproc://mon-lifecycle", listening.endpoint
+      assert_nil listening.pipe
 
       accepted = events.receive
       assert_equal OMQ::MonitorEvent::Kind::Accepted, accepted.kind
+      refute_nil accepted.pipe
 
       a.close
       b.close
@@ -36,6 +38,7 @@ describe "Socket#monitor" do
       connected = events.receive
       assert_equal OMQ::MonitorEvent::Kind::Connected, connected.kind
       assert_equal "inproc://mon-connected", connected.endpoint
+      refute_nil connected.pipe
 
       a.close
       b.close
