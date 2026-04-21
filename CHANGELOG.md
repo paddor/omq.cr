@@ -39,9 +39,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   events; drop-on-full so a slow subscriber never stalls the socket
 - Cross-language interop tests under `test/system/` covering REQ/REP,
   PUSH/PULL, PUB/SUB between Crystal OMQ and Ruby `omq` over TCP
+- Draft socket types (opt-in via `require "omq/<name>"`):
+  CLIENT / SERVER (RFC 41), RADIO / DISH (RFC 48),
+  SCATTER / GATHER (RFC 49), PEER (RFC 51), CHANNEL (RFC 52).
+  Group- and routing-ID-based routing; DISH emits wire `JOIN`/`LEAVE`
+  commands for libzmq RADIO interop; v0.1 RADIO broadcasts and lets
+  DISH filter locally.
 
 ### Not yet implemented
 
-- Draft socket types: CLIENT / SERVER, RADIO / DISH, SCATTER / GATHER,
-  PEER, CHANNEL
 - CURVE mechanism (blocked on a Crystal libsodium wrapper)

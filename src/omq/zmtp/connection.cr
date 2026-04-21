@@ -133,6 +133,9 @@ module OMQ::ZMTP
         # v0.1 PUB broadcasts everything and filters on the SUB side, so
         # these are silent no-ops. Keeps interop with libzmq/ruby-omq
         # SUBs that send real wire-level subscribe commands.
+      when "JOIN", "LEAVE"
+        # v0.1 RADIO broadcasts everything and filters on the DISH side,
+        # so JOIN/LEAVE are silent no-ops (same pattern as SUBSCRIBE).
       else
         raise ProtocolError.new("unhandled in-band command: #{name}")
       end
