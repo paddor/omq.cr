@@ -40,6 +40,14 @@ module OMQ
       @strategy.attach(pipe)
     end
 
+    protected def on_close_send : Nil
+      @strategy.close_send
+    end
+
+    protected def await_strategy_drain(span : Time::Span?) : Nil
+      @strategy.await_drained(span)
+    end
+
     protected def on_close : Nil
       @strategy.close
     end

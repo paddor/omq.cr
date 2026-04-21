@@ -88,24 +88,26 @@ module OMQ
 
         tx = Channel(Message).new(send_capacity)
         rx = Channel(Message).new(recv_capacity)
+        send_done = Channel(Nil).new
 
-        spawn write_pump(zmtp, tx, rx)
+        spawn write_pump(zmtp, tx, rx, send_done)
         spawn read_pump(zmtp, rx, tx)
 
-        pipe = Pipe.new(tx: tx, rx: rx)
+        pipe = Pipe.new(tx: tx, rx: rx, send_done: send_done)
         if identity = zmtp.peer_properties["Identity"]?
           pipe.peer_identity = identity
         end
         pipe
       end
 
-      private def write_pump(zmtp : ZMTP::Connection, tx : Channel(Message), rx : Channel(Message)) : Nil
+      private def write_pump(zmtp : ZMTP::Connection, tx : Channel(Message), rx : Channel(Message), send_done : Channel(Nil)) : Nil
         while msg = tx.receive?
           zmtp.send_message(msg)
         end
       rescue IO::Error | ProtocolError
         # peer gone
       ensure
+        send_done.close
         tx.close
         rx.close
         zmtp.close

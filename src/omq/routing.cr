@@ -10,6 +10,21 @@ module OMQ
 
       # Tear down all internal fibers and peers. Must be idempotent.
       abstract def close : Nil
+
+      # Stop accepting new application sends so the strategy's pumps can
+      # drain into per-pipe queues. Default: same as `#close`. Send-side
+      # strategies override to separate "stop accepting" from "tear down".
+      def close_send : Nil
+        close
+      end
+
+      # Block until the strategy's send pumps have finished moving all
+      # buffered messages into pipe queues (or `span` elapses). Default:
+      # no-op (nothing to drain). Returns `true` on drain, `false` on
+      # timeout.
+      def await_drained(span : Time::Span?) : Bool
+        true
+      end
     end
   end
 end

@@ -13,8 +13,9 @@ module OMQ
     property send_hwm : Int32 = DEFAULT_HWM
     property recv_hwm : Int32 = DEFAULT_HWM
 
-    # `nil` linger = wait forever (matching libzmq); `0.seconds` = immediate drop.
-    property linger : Time::Span? = nil
+    # `nil` linger = wait forever (matching libzmq `-1`); `0.seconds` =
+    # immediate close (drop in-flight). Default matches Ruby OMQ: drop.
+    property linger : Time::Span? = 0.seconds
 
     property identity : Bytes = Bytes.empty
     property? router_mandatory : Bool = false

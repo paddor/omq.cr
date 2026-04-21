@@ -111,8 +111,28 @@ module OMQ
       @inproc_names.each { |n| Transport::Inproc.unbind(n) }
       @tcp_listeners.each(&.close)
       @ipc_listeners.each(&.close)
+      drain_for_linger(@options.linger)
       @pipes.each(&.close)
       on_close
+    end
+
+    # Two-phase drain so in-flight sends reach the wire before teardown.
+    # linger=0 skips drain entirely (current fast-path); nil waits forever;
+    # anything else splits the budget between the routing-strategy pumps
+    # and the per-pipe write pumps.
+    private def drain_for_linger(linger : Time::Span?) : Nil
+      return if linger == 0.seconds
+      on_close_send
+      deadline = linger ? Time.instant + linger : nil
+      await_strategy_drain(remaining(deadline))
+      @pipes.each(&.close_send)
+      @pipes.each { |p| p.await_drained(remaining(deadline)) }
+    end
+
+    private def remaining(deadline : Time::Instant?) : Time::Span?
+      return nil unless deadline
+      left = deadline - Time.instant
+      left.positive? ? left : 0.seconds
     end
 
     # Last-bound TCP port, or `nil` if not bound over TCP.
@@ -134,6 +154,15 @@ module OMQ
 
     # Subclasses override to tear down their strategy.
     protected def on_close : Nil
+    end
+
+    # Subclasses override to stop their strategy from accepting new
+    # sends, without tearing down queues that linger still needs.
+    protected def on_close_send : Nil
+    end
+
+    # Subclasses with a send-side strategy override to expose its drain.
+    protected def await_strategy_drain(span : Time::Span?) : Nil
     end
 
     protected def parse_endpoint(endpoint : String) : {String, String}
