@@ -11,7 +11,11 @@ require "./omq/socket"
 require "./omq/pipe"
 require "./omq/transport/inproc"
 require "./omq/transport/tcp"
+require "./omq/routing"
+require "./omq/routing/pull"
+require "./omq/routing/push"
 require "./omq/pair"
+require "./omq/push_pull"
 
 # Pure-Crystal ZeroMQ (ZMTP 3.1). Interoperable with libzmq, pyzmq, CZMQ,
 # and the Ruby `omq` gem. No libzmq, no FFI.
