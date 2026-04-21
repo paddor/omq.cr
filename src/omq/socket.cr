@@ -16,6 +16,7 @@ module OMQ
 
     @inproc_names = [] of String
     @tcp_listeners = [] of Transport::TCP::Listener
+    @ipc_listeners = [] of Transport::IPC::Listener
     @pipes = [] of Pipe
 
     def initialize(endpoint : String? = nil)
@@ -58,6 +59,10 @@ module OMQ
         listener = Transport::TCP.bind(endpoint)
         @tcp_listeners << listener
         spawn accept_tcp(listener)
+      when "ipc"
+        listener = Transport::IPC.bind(endpoint)
+        @ipc_listeners << listener
+        spawn accept_ipc(listener)
       else
         raise UnsupportedTransport.new(scheme)
       end
@@ -81,6 +86,18 @@ module OMQ
                  mechanism: @options.mechanism,
                  max_message_size: @options.max_message_size,
                )
+             when "ipc"
+               unix = Transport::IPC.connect(endpoint)
+               Transport::IPC.adopt(
+                 unix,
+                 local_socket_type: socket_type,
+                 local_identity: @options.identity,
+                 as_server: false,
+                 send_capacity: @options.send_hwm,
+                 recv_capacity: @options.recv_hwm,
+                 mechanism: @options.mechanism,
+                 max_message_size: @options.max_message_size,
+               )
              else
                raise UnsupportedTransport.new(scheme)
              end
@@ -93,6 +110,7 @@ module OMQ
       @closed = true
       @inproc_names.each { |n| Transport::Inproc.unbind(n) }
       @tcp_listeners.each(&.close)
+      @ipc_listeners.each(&.close)
       @pipes.each(&.close)
       on_close
     end
@@ -141,6 +159,29 @@ module OMQ
         begin
           pipe = Transport::TCP.adopt(
             tcp,
+            local_socket_type: socket_type,
+            local_identity: @options.identity,
+            as_server: true,
+            send_capacity: @options.send_hwm,
+            recv_capacity: @options.recv_hwm,
+            mechanism: @options.mechanism,
+            max_message_size: @options.max_message_size,
+          )
+          register_pipe(pipe)
+        rescue IO::Error | ProtocolError
+          # handshake failed; keep accepting
+        end
+      end
+    end
+
+    private def accept_ipc(listener : Transport::IPC::Listener) : Nil
+      loop do
+        unix = listener.accept
+        break unless unix
+        break if @closed
+        begin
+          pipe = Transport::IPC.adopt(
+            unix,
             local_socket_type: socket_type,
             local_identity: @options.identity,
             as_server: true,
