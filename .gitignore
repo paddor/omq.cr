@@ -1,3 +1,5 @@
+/bench/results.jsonl
+/bench/scenarios/comparison/jeromq-*.jar
 /docs/
 /lib/
 /bin/
