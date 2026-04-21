@@ -13,7 +13,7 @@ module OMQ
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm, @options.conflate)
+      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm, @options.conflate, @options.on_mute)
     end
 
     def send(msg : String) : self
