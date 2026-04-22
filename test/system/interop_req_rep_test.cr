@@ -8,11 +8,11 @@ describe "Ruby REP ↔ Crystal REQ over TCP" do
     end
 
     OMQ::SystemTestHelper.with_timeout(5.seconds) do
-      process, port = OMQ::SystemTestHelper.spawn_ruby_with_port("req_rep_server.rb")
+      process, endpoint = OMQ::SystemTestHelper.spawn_ruby_with_endpoint("req_rep_server.rb")
 
       begin
         req = OMQ::REQ.new
-        req.connect("tcp://127.0.0.1:#{port}")
+        req.connect(endpoint)
 
         req.send("hello")
         reply = req.receive

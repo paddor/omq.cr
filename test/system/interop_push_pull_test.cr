@@ -8,11 +8,11 @@ describe "Ruby PULL ↔ Crystal PUSH over TCP" do
     end
 
     OMQ::SystemTestHelper.with_timeout(5.seconds) do
-      process, port = OMQ::SystemTestHelper.spawn_ruby_with_port("push_pull_puller.rb")
+      process, endpoint = OMQ::SystemTestHelper.spawn_ruby_with_endpoint("push_pull_puller.rb")
 
       begin
         push = OMQ::PUSH.new
-        push.connect("tcp://127.0.0.1:#{port}")
+        push.connect(endpoint)
 
         n = 10
         n.times { |i| push.send("work-#{i}") }

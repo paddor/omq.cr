@@ -2,7 +2,7 @@
 
 # GATHER server for Crystal ↔ Ruby SCATTER/GATHER interop test.
 #
-# Binds, prints PORT, prints every received single-frame message on its
+# Binds, prints ENDPOINT, prints every received single-frame message on its
 # own stdout line until EOF on stdin.
 
 require "omq"
@@ -13,8 +13,8 @@ $stdout.sync = true
 
 Async do |task|
   gather = OMQ::GATHER.new
-  port   = gather.bind("tcp://127.0.0.1:0")
-  puts "PORT=#{port}"
+  endpoint = gather.bind("tcp://127.0.0.1:0")
+  puts "ENDPOINT=#{endpoint}"
 
   watchdog = task.async do
     $stdin.read

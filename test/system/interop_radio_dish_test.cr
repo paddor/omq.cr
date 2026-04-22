@@ -9,11 +9,11 @@ describe "Crystal DISH ↔ Ruby RADIO over TCP" do
     end
 
     OMQ::SystemTestHelper.with_timeout(5.seconds) do
-      process, port = OMQ::SystemTestHelper.spawn_ruby_with_port("radio_publisher.rb", ["weather", "3"])
+      process, endpoint = OMQ::SystemTestHelper.spawn_ruby_with_endpoint("radio_publisher.rb", ["weather", "3"])
 
       begin
         dish = OMQ::DISH.new
-        dish.connect("tcp://127.0.0.1:#{port}")
+        dish.connect(endpoint)
         dish.join("weather")
 
         expected = ["msg-0", "msg-1", "msg-2"]

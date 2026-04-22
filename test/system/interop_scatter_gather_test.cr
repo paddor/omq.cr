@@ -9,11 +9,11 @@ describe "Crystal SCATTER ↔ Ruby GATHER over TCP" do
     end
 
     OMQ::SystemTestHelper.with_timeout(5.seconds) do
-      process, port = OMQ::SystemTestHelper.spawn_ruby_with_port("scatter_gather_gatherer.rb")
+      process, endpoint = OMQ::SystemTestHelper.spawn_ruby_with_endpoint("scatter_gather_gatherer.rb")
 
       begin
         scatter = OMQ::SCATTER.new
-        scatter.connect("tcp://127.0.0.1:#{port}")
+        scatter.connect(endpoint)
 
         scatter.send("one")
         scatter.send("two")

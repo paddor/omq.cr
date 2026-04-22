@@ -2,7 +2,7 @@
 
 # REP server for Crystal ↔ Ruby REQ/REP interop test.
 #
-# Binds on an ephemeral TCP port, prints "PORT=<n>\n" so the Crystal
+# Binds on an ephemeral TCP port, prints "ENDPOINT=<uri>\n" so the Crystal
 # harness knows where to connect, then loops: receive a single-frame
 # request, reply with the same frame uppercased. Exits on stdin EOF.
 
@@ -13,8 +13,8 @@ $stdout.sync = true
 
 Async do |task|
   rep = OMQ::REP.new
-  port = rep.bind("tcp://127.0.0.1:0")
-  puts "PORT=#{port}"
+  endpoint = rep.bind("tcp://127.0.0.1:0")
+  puts "ENDPOINT=#{endpoint}"
 
   watchdog = task.async do
     $stdin.read

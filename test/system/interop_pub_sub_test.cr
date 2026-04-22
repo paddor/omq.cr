@@ -9,12 +9,12 @@ describe "Ruby PUB ↔ Crystal SUB over TCP" do
 
     OMQ::SystemTestHelper.with_timeout(8.seconds) do
       n = 5
-      process, port = OMQ::SystemTestHelper.spawn_ruby_with_port("pub_sub_publisher.rb", ["news", n.to_s])
+      process, endpoint = OMQ::SystemTestHelper.spawn_ruby_with_endpoint("pub_sub_publisher.rb", ["news", n.to_s])
 
       begin
         sub = OMQ::SUB.new
         sub.recv_hwm = 1000
-        sub.connect("tcp://127.0.0.1:#{port}")
+        sub.connect(endpoint)
         sub.subscribe("news")
 
         received = [] of String

@@ -9,11 +9,11 @@ describe "Crystal CHANNEL ↔ Ruby CHANNEL over TCP" do
     end
 
     OMQ::SystemTestHelper.with_timeout(5.seconds) do
-      process, port = OMQ::SystemTestHelper.spawn_ruby_with_port("channel_echo.rb")
+      process, endpoint = OMQ::SystemTestHelper.spawn_ruby_with_endpoint("channel_echo.rb")
 
       begin
         channel = OMQ::CHANNEL.new
-        channel.connect("tcp://127.0.0.1:#{port}")
+        channel.connect(endpoint)
 
         channel.send("hello")
         reply = channel.receive

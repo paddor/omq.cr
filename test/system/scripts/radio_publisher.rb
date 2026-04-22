@@ -4,7 +4,7 @@
 #
 # Usage: radio_publisher.rb <group> <count>
 #
-# Binds, prints PORT, waits for a DISH peer to attach, then publishes
+# Binds, prints ENDPOINT, waits for a DISH peer to attach, then publishes
 # <count> messages on <group> ("msg-<i>") plus a few on the sentinel
 # group "ignore" that DISH should filter out.
 
@@ -19,8 +19,8 @@ count = (ARGV[1] || "5").to_i
 
 Async do |task|
   radio = OMQ::RADIO.new
-  port  = radio.bind("tcp://127.0.0.1:0")
-  puts "PORT=#{port}"
+  endpoint = radio.bind("tcp://127.0.0.1:0")
+  puts "ENDPOINT=#{endpoint}"
 
   watchdog = task.async do
     $stdin.read

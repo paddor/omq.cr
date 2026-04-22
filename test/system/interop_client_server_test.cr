@@ -9,11 +9,11 @@ describe "Crystal CLIENT ↔ Ruby SERVER over TCP" do
     end
 
     OMQ::SystemTestHelper.with_timeout(5.seconds) do
-      process, port = OMQ::SystemTestHelper.spawn_ruby_with_port("client_server_server.rb")
+      process, endpoint = OMQ::SystemTestHelper.spawn_ruby_with_endpoint("client_server_server.rb")
 
       begin
         client = OMQ::CLIENT.new
-        client.connect("tcp://127.0.0.1:#{port}")
+        client.connect(endpoint)
 
         client.send("hello")
         reply = client.receive

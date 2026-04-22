@@ -2,7 +2,7 @@
 
 # SERVER for Crystal ↔ Ruby CLIENT/SERVER interop test.
 #
-# Binds, prints PORT, echoes each received frame back uppercased via
+# Binds, prints ENDPOINT, echoes each received frame back uppercased via
 # send_to so the reply is routed to the originating CLIENT.
 
 require "omq"
@@ -13,8 +13,8 @@ $stdout.sync = true
 
 Async do |task|
   server = OMQ::SERVER.new
-  port   = server.bind("tcp://127.0.0.1:0")
-  puts "PORT=#{port}"
+  endpoint = server.bind("tcp://127.0.0.1:0")
+  puts "ENDPOINT=#{endpoint}"
 
   watchdog = task.async do
     $stdin.read

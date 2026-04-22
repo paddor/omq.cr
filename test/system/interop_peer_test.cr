@@ -9,11 +9,11 @@ describe "Crystal PEER ↔ Ruby PEER over TCP" do
     end
 
     OMQ::SystemTestHelper.with_timeout(5.seconds) do
-      process, port = OMQ::SystemTestHelper.spawn_ruby_with_port("peer_echo.rb")
+      process, endpoint = OMQ::SystemTestHelper.spawn_ruby_with_endpoint("peer_echo.rb")
 
       begin
         peer = OMQ::PEER.new
-        peer.connect("tcp://127.0.0.1:#{port}")
+        peer.connect(endpoint)
 
         # Wait for the bind-side (Ruby) peer to assign us a routing ID
         # locally on our own side too. We discover the peer's ID by

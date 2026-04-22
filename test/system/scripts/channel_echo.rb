@@ -2,7 +2,7 @@
 
 # CHANNEL echo server for Crystal ↔ Ruby CHANNEL interop test.
 #
-# Binds, prints PORT, echoes each received single-frame message back
+# Binds, prints ENDPOINT, echoes each received single-frame message back
 # uppercased.
 
 require "omq"
@@ -13,8 +13,8 @@ $stdout.sync = true
 
 Async do |task|
   channel = OMQ::CHANNEL.new
-  port    = channel.bind("tcp://127.0.0.1:0")
-  puts "PORT=#{port}"
+  endpoint = channel.bind("tcp://127.0.0.1:0")
+  puts "ENDPOINT=#{endpoint}"
 
   watchdog = task.async do
     $stdin.read

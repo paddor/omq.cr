@@ -4,7 +4,7 @@
 #
 # Usage: pub_sub_publisher.rb <topic> <n>
 #
-# Binds, prints PORT=<n>, waits for a subscriber to attach (peer_count >
+# Binds, prints ENDPOINT=<uri>, waits for a subscriber to attach (peer_count >
 # 0), then publishes <n> messages of the form "<topic> <i>" with a small
 # gap so the subscriber has time to finish its local subscribe before the
 # first frame hits the wire. Exits on EOF.
@@ -19,8 +19,8 @@ count = (ARGV[1] || "10").to_i
 
 Async do |task|
   pub = OMQ::PUB.new
-  port = pub.bind("tcp://127.0.0.1:0")
-  puts "PORT=#{port}"
+  endpoint = pub.bind("tcp://127.0.0.1:0")
+  puts "ENDPOINT=#{endpoint}"
 
   watchdog = task.async do
     $stdin.read

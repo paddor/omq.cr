@@ -2,7 +2,7 @@
 
 # PEER echo server for Crystal ↔ Ruby PEER interop test.
 #
-# Binds, prints PORT, echoes each received frame back uppercased via
+# Binds, prints ENDPOINT, echoes each received frame back uppercased via
 # send_to using the routing ID surfaced as the first frame.
 
 require "omq"
@@ -13,8 +13,8 @@ $stdout.sync = true
 
 Async do |task|
   peer = OMQ::PEER.new
-  port = peer.bind("tcp://127.0.0.1:0")
-  puts "PORT=#{port}"
+  endpoint = peer.bind("tcp://127.0.0.1:0")
+  puts "ENDPOINT=#{endpoint}"
 
   watchdog = task.async do
     $stdin.read
