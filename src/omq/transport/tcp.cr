@@ -90,7 +90,9 @@ module OMQ
 
         spawn write_pump(zmtp, tx, rx, commands_tx, send_done)
         spawn read_pump(zmtp, rx, tx)
-        if interval = heartbeat_interval
+        # PING/PONG is a ZMTP 3.1 addition; 3.0 peers would error on an
+        # unknown command. Skip heartbeats against them.
+        if (interval = heartbeat_interval) && zmtp.peer_minor >= 1
           spawn Transport.heartbeat_pump(
             zmtp,
             interval: interval,
@@ -100,6 +102,7 @@ module OMQ
         end
 
         pipe = Pipe.new(tx: tx, rx: rx, send_done: send_done, commands_tx: commands_tx)
+        pipe.peer_zmtp_minor = zmtp.peer_minor
         if identity = zmtp.peer_properties["Identity"]?
           pipe.peer_identity = identity
         end

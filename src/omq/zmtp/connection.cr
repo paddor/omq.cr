@@ -4,6 +4,12 @@ module OMQ::ZMTP
   class Connection
     getter peer_properties : Hash(String, Bytes) = {} of String => Bytes
 
+    # ZMTP minor version the peer advertised in its greeting.
+    # 0 = ZMTP 3.0 (legacy subscribe as data frames, no PING/PONG),
+    # 1 = ZMTP 3.1 (SUBSCRIBE/CANCEL commands, PING/PONG).
+    # Set during #handshake; meaningless before.
+    getter peer_minor : UInt8 = MINOR_VERSION
+
     # Wall-clock instant of the most recent successful wire-level read.
     # Used by heartbeat pumps to decide when the peer has gone silent.
     getter last_received_at : Time::Instant = Time.instant
@@ -31,6 +37,7 @@ module OMQ::ZMTP
       flush
 
       remote = Greeting.from_io(@io)
+      @peer_minor = remote.minor
       unless remote.mechanism == @mechanism.name
         raise ProtocolError.new(
           "mechanism mismatch: local=#{@mechanism.name} remote=#{remote.mechanism}"

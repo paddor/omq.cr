@@ -17,6 +17,11 @@ module OMQ
     # peer didn't advertise one; ROUTER will substitute a random ID.
     property peer_identity : Bytes = Bytes.empty
 
+    # ZMTP minor version the peer advertised (0 = 3.0, 1 = 3.1). Inproc
+    # pipes don't do a wire handshake and default to 3.1 semantics.
+    # Wire-level subscribe encoding and PING eligibility key off this.
+    property peer_zmtp_minor : UInt8 = ZMTP::MINOR_VERSION
+
 
     # Out-of-band channel for pre-encoded ZMTP commands (SUBSCRIBE/CANCEL).
     # Only populated for TCP/IPC pipes — inproc doesn't speak ZMTP on the

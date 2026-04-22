@@ -20,7 +20,7 @@ across the network. Reconnects, queuing, and back-pressure are handled for
 you; you write the interesting part.
 
 This is the Crystal sibling of the pure-Ruby [omq](https://github.com/zeromq/omq)
-gem. Same wire protocol (ZMTP 3.1), same socket-type lineup, same bind/connect
+gem. Same wire protocol (ZMTP 3.1, with 3.0 peer compat), same socket-type lineup, same bind/connect
 semantics — ported to Crystal's fiber scheduler and libevent-backed event
 loop.
 

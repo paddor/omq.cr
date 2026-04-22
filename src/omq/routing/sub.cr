@@ -6,11 +6,13 @@ module OMQ
     # to the app.
     #
     # `#subscribe` is two things at once: (1) it installs a local filter
-    # so non-matching frames are dropped on arrival, and (2) it pushes
-    # a ZMTP 3.0-legacy subscribe frame (`\x01prefix`) to every peer so
-    # libzmq/ruby-omq PUBs — which filter upstream — actually send us
-    # matching traffic. New pipes get every current subscription replayed
-    # at attach time.
+    # so non-matching frames are dropped on arrival, and (2) it pushes a
+    # subscribe notification upstream so libzmq/ruby-omq PUBs — which
+    # filter upstream — actually send us matching traffic. The wire
+    # encoding depends on the peer's ZMTP minor version: 3.1 uses a
+    # SUBSCRIBE/CANCEL command frame; 3.0 uses a regular data frame
+    # whose first byte is 0x01 (subscribe) or 0x00 (cancel). New pipes
+    # get every current subscription replayed at attach time.
     class Sub < Strategy
       getter rx : Channel(Message)
 
@@ -71,8 +73,20 @@ module OMQ
       end
 
       private def send_to(pipe : Pipe, marker : UInt8, prefix : Bytes) : Nil
-        cmd = marker == 0x01_u8 ? ZMTP::Command.subscribe(prefix) : ZMTP::Command.cancel(prefix)
-        pipe.send_command(cmd)
+        if pipe.peer_zmtp_minor == 0
+          # ZMTP 3.0: legacy data frame with \x01 / \x00 prefix byte.
+          payload = Bytes.new(1 + prefix.size)
+          payload[0] = marker
+          prefix.copy_to(payload + 1) if prefix.size > 0
+          begin
+            pipe.tx.send(Message{payload})
+          rescue Channel::ClosedError
+            # peer gone — drop silently
+          end
+        else
+          cmd = marker == 0x01_u8 ? ZMTP::Command.subscribe(prefix) : ZMTP::Command.cancel(prefix)
+          pipe.send_command(cmd)
+        end
       end
 
       private def drain(pipe : Pipe) : Nil

@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `tcp://` (ephemeral ports via `:0`, `TCP_NODELAY` on)
 - ZMTP 3.1 codec: frames, greeting, READY / PING / PONG /
   SUBSCRIBE / CANCEL commands, NULL mechanism
+- ZMTP 3.0 peer compatibility: SUB switches to legacy `\x01prefix` /
+  `\x00prefix` data frames for subscribe/unsubscribe against a 3.0
+  peer, and `heartbeat_interval` is a no-op against 3.0 peers (PING
+  is a 3.1-only command)
 - ZMTP 2.x peers rejected after 11 bytes with `UnsupportedVersion`
 - Socket options: `send_hwm`, `recv_hwm`, `linger`, `identity`,
   `read_timeout`, `write_timeout`, `reconnect_interval` (fixed span or
