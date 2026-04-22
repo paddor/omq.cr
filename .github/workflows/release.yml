@@ -1,0 +1,77 @@
+# Crystal shards aren't published to a registry — the public index at
+# crystalshards.xyz (and `shards` resolvers pointing at `github: ...`)
+# discover versions from git tags. So "release" here means:
+#
+#   1. tag the commit as `v<version>` (must match shard.yml's `version:`),
+#   2. this workflow verifies + re-runs the test suite against that tag,
+#   3. publishes a GitHub Release with the matching CHANGELOG section.
+#
+# Users then get the new version via:
+#     dependencies:
+#       omq:
+#         github: <owner>/<repo>
+#         version: ~> 0.1
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to create the GitHub Release
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # for CHANGELOG diffing and full tag history
+
+      - uses: crystal-lang/install-crystal@v1
+
+      - name: verify tag matches shard.yml version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          shard_version=$(awk '/^version:/ {print $2}' shard.yml)
+          if [ "$tag_version" != "$shard_version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match shard.yml version $shard_version" >&2
+            exit 1
+          fi
+          echo "version=$tag_version" >>"$GITHUB_ENV"
+
+      - name: shards install
+        run: shards install
+
+      - name: unit tests
+        run: crystal run test/run.cr
+
+      - name: extract release notes from CHANGELOG
+        run: |
+          # Pull the section for this version, or fall back to [Unreleased].
+          # Keep-a-Changelog sections start with `## [<ver>]` and end at the
+          # next `## ` heading.
+          awk -v ver="$version" '
+            /^## / {
+              if (in_section) exit
+              if ($0 ~ "\\[" ver "\\]" || $0 ~ "\\[Unreleased\\]") {
+                in_section = 1
+                next
+              }
+            }
+            in_section { print }
+          ' CHANGELOG.md >RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "No CHANGELOG section for $version — using tag message" >&2
+            git tag -l --format='%(contents)' "$GITHUB_REF_NAME" >RELEASE_NOTES.md
+          fi
+          echo "---- RELEASE_NOTES.md ----"
+          cat RELEASE_NOTES.md
+
+      - name: create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}   # v0.1.0-rc1 → prerelease

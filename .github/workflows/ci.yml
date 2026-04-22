@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: test (crystal ${{ matrix.crystal }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        crystal:
+          - "1.20.0"   # minimum supported (matches shard.yml)
+          - latest     # latest stable release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ matrix.crystal }}
+
+      - name: shards install
+        run: shards install
+
+      - name: unit tests
+        run: crystal run test/run.cr
+
+  interop:
+    name: interop (ruby omq)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: crystal-lang/install-crystal@v1
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: install ruby omq gem
+        run: gem install omq --no-document
+
+      - name: shards install
+        run: shards install
+
+      - name: cross-language interop tests
+        run: crystal run test/system/run.cr
