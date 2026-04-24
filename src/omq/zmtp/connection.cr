@@ -57,7 +57,7 @@ module OMQ::ZMTP
       @write_mutex.synchronize do
         last = parts.size - 1
         parts.each_with_index do |part, i|
-          Frame.encode(@io, part, more: i < last)
+          write_frame(part, more: i < last, command: false)
         end
         flush
       end
@@ -68,7 +68,7 @@ module OMQ::ZMTP
     def send_ping(ttl_deci : UInt16 = 0_u16, context : Bytes = Bytes.empty) : Nil
       ping = Command.ping(ttl_deci, context)
       @write_mutex.synchronize do
-        Frame.encode(@io, ping, command: true)
+        write_frame(ping, more: false, command: true)
         flush
       end
     end
@@ -77,8 +77,21 @@ module OMQ::ZMTP
     # Used by SUB for SUBSCRIBE/CANCEL.
     def send_command(payload : Bytes) : Nil
       @write_mutex.synchronize do
-        Frame.encode(@io, payload, command: true)
+        write_frame(payload, more: false, command: true)
         flush
+      end
+    end
+
+
+    # Encrypt-aware write: when the mechanism encrypts, `payload` is the
+    # inner plaintext (with its real flags) and the wire frame is a
+    # COMMAND carrying an encrypted MESSAGE body.
+    private def write_frame(payload : Bytes, *, more : Bool, command : Bool) : Nil
+      if @mechanism.encrypted?
+        body = @mechanism.encrypt(payload, more: more, command: command)
+        Frame.encode(@io, body, command: true)
+      else
+        Frame.encode(@io, payload, more: more, command: command)
       end
     end
 
@@ -92,9 +105,9 @@ module OMQ::ZMTP
         @last_received_at = Time.instant
 
         flags = flags_byte
-        more = (flags & FLAG_MORE) != 0
+        wire_more = (flags & FLAG_MORE) != 0
         long = (flags & FLAG_LONG) != 0
-        command = (flags & FLAG_COMMAND) != 0
+        wire_command = (flags & FLAG_COMMAND) != 0
         size = if long
                  @io.read_bytes(UInt64, IO::ByteFormat::NetworkEndian).to_i64
                else
@@ -103,8 +116,17 @@ module OMQ::ZMTP
         if max = @max_message_size
           raise ProtocolError.new("frame too large: #{size} > #{max}") if size > max
         end
-        payload = Bytes.new(size)
-        @io.read_fully(payload) if size > 0
+        body = Bytes.new(size)
+        @io.read_fully(body) if size > 0
+
+        if @mechanism.encrypted?
+          raise ProtocolError.new("expected MESSAGE command under CURVE") unless wire_command
+          payload, more, command = @mechanism.decrypt(body)
+        else
+          payload = body
+          more = wire_more
+          command = wire_command
+        end
 
         # Commands are handled transparently (PING/PONG); pass others up.
         if command

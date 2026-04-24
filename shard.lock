@@ -4,3 +4,7 @@ shards:
     git: https://github.com/ysbaddaden/minitest.cr.git
     version: 1.6.1
 
+  natron:
+    path: ../natron.cr
+    version: 0.1.0
+

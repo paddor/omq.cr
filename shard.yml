@@ -16,3 +16,5 @@ authors:
 development_dependencies:
   minitest:
     github: ysbaddaden/minitest.cr
+  natron:
+    path: ../natron.cr

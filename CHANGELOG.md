@@ -52,6 +52,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   commands for libzmq RADIO interop; v0.1 RADIO broadcasts and lets
   DISH filter locally.
 
-### Not yet implemented
+- CURVE mechanism (RFC 26): Curve25519 + XSalsa20-Poly1305 authenticated
+  encryption. Opt-in via `require "omq/curve"`. Depends on the `natron`
+  libsodium wrapper — add it to your shard.yml. HELLO / WELCOME /
+  INITIATE / READY handshake, per-peer session box, nonce counters, and
+  optional server-side authenticator callback.
+- Examples under `examples/` — PUSH/PULL (ventilator + worker), REQ/REP
+  (client + server), PUB/SUB (publisher + subscriber).
 
-- CURVE mechanism (blocked on a Crystal libsodium wrapper)
+### Fixed
+
+- Accepted TCP/IPC sockets whose handshake raised (e.g. CURVE auth
+  failure) were leaked instead of closed, leaving the peer hanging on
+  a read that would never complete.

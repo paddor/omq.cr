@@ -183,8 +183,38 @@ comparison.
 Pre-1.0. All 12 standard socket types work, inproc/ipc/tcp all work,
 heartbeat/linger/reconnect/HWM/on_mute/conflate/max_message_size/sndbuf/rcvbuf
 are wired through. Draft socket types (CLIENT/SERVER, RADIO/DISH,
-SCATTER/GATHER, PEER, CHANNEL), CURVE encryption, and the monitor-event
-API are not yet implemented — see [`CHANGELOG.md`](CHANGELOG.md).
+SCATTER/GATHER, PEER, CHANNEL), CURVE encryption (opt-in via `require
+"omq/curve"`), and the monitor-event API all work — see
+[`CHANGELOG.md`](CHANGELOG.md).
+
+## CURVE encryption
+
+Opt-in; depends on the [`natron`](https://github.com/paddor/natron.cr)
+libsodium wrapper. Add it to your shard.yml alongside `omq`, then:
+
+```crystal
+require "omq"
+require "omq/curve"
+
+server_sk = Natron::PrivateKey.generate
+server_pk = server_sk.public_key
+
+rep = OMQ::REP.new
+rep.mechanism = OMQ::ZMTP::Mechanism::Curve.server(
+  public_key: server_pk.bytes, secret_key: server_sk.bytes)
+rep.bind("tcp://127.0.0.1:5555")
+
+client_sk = Natron::PrivateKey.generate
+req = OMQ::REQ.new
+req.mechanism = OMQ::ZMTP::Mechanism::Curve.client(
+  server_key: server_pk.bytes,
+  public_key: client_sk.public_key.bytes,
+  secret_key: client_sk.bytes)
+req.connect("tcp://127.0.0.1:5555")
+```
+
+Pass an authenticator proc to the server factory to whitelist client
+public keys.
 
 ## Development
 

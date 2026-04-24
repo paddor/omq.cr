@@ -382,6 +382,7 @@ module OMQ
           register_pipe(pipe)
           emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
         rescue err : IO::Error | ProtocolError
+          tcp.close rescue nil
           emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err)
         end
       end
@@ -412,6 +413,7 @@ module OMQ
           register_pipe(pipe)
           emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
         rescue err : IO::Error | ProtocolError
+          unix.close rescue nil
           emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err)
         end
       end
@@ -420,13 +422,13 @@ module OMQ
     delegate send_hwm, recv_hwm, linger, identity,
       read_timeout, write_timeout, recv_timeout, send_timeout,
       reconnect_interval, heartbeat_interval, heartbeat_ttl, heartbeat_timeout,
-      max_message_size, sndbuf, rcvbuf, on_mute, conflate,
+      max_message_size, sndbuf, rcvbuf, on_mute, conflate, mechanism,
       router_mandatory?, to: @options
 
     {% for m in %w(send_hwm recv_hwm linger identity read_timeout write_timeout
                    recv_timeout send_timeout reconnect_interval heartbeat_interval
                    heartbeat_ttl heartbeat_timeout max_message_size sndbuf rcvbuf
-                   on_mute conflate router_mandatory) %}
+                   on_mute conflate mechanism router_mandatory) %}
       def {{m.id}}=(val)
         @options.{{m.id}} = val
       end
