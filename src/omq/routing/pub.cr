@@ -1,15 +1,11 @@
 module OMQ
   module Routing
-    # PUB routing: fan-out to every connected peer.
-    #
-    # v0.1 does not yet negotiate SUBSCRIBE/CANCEL over the wire; every
-    # message is fanned out and filtering happens on the SUB side. This
-    # is correct for OMQ-to-OMQ traffic on any transport, but wastes
-    # bandwidth on TCP and does not interoperate with libzmq PUB sockets
-    # (which require SUBSCRIBE before they send). Wire-level subscribe
-    # support is tracked separately.
+    # PUB routing: fan-out to every connected peer. SUBSCRIBE/CANCEL
+    # commands are observed for readiness parity with Ruby OMQ, while
+    # message filtering still happens on the SUB side.
     class Pub < Strategy
       getter tx : Channel(Message)
+      getter subscriber_joined : Channel(Pipe)
 
       # When on_mute is a drop strategy, each peer gets its own DropQueue
       # and a forwarder fiber draining into pipe.tx. In Block mode we
@@ -19,6 +15,7 @@ module OMQ
 
       def initialize(capacity : Int32, @conflate : Bool = false, @on_mute : Options::MuteStrategy = Options::MuteStrategy::Block)
         @tx = Channel(Message).new(capacity)
+        @subscriber_joined = Channel(Pipe).new(128)
         @peer_slots = [] of PeerSlot
         @pipes_mutex = Mutex.new
         @closed = Atomic(Bool).new(false)
@@ -42,11 +39,13 @@ module OMQ
         return if closed?
         slot = build_slot(pipe)
         @pipes_mutex.synchronize { @peer_slots << slot }
+        spawn command_listener(pipe)
       end
 
       def close : Nil
         return unless close_once
         @tx.close
+        @subscriber_joined.close
         @pipes_mutex.synchronize do
           @peer_slots.each { |s| s.drop.try(&.close) }
         end
@@ -75,6 +74,23 @@ module OMQ
             break
           end
         end
+      end
+
+      private def command_listener(pipe : Pipe) : Nil
+        commands = pipe.commands_rx
+        return unless commands
+        while event = commands.receive?
+          next unless event.name == "SUBSCRIBE"
+          notify_subscriber_joined(pipe)
+        end
+      end
+
+      private def notify_subscriber_joined(pipe : Pipe) : Nil
+        select
+        when @subscriber_joined.send(pipe)
+        else
+        end
+      rescue Channel::ClosedError
       end
 
       private def dispatcher : Nil

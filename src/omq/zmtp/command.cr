@@ -1,4 +1,12 @@
 module OMQ::ZMTP
+  struct CommandEvent
+    getter name : String
+    getter body : Bytes
+
+    def initialize(@name : String, @body : Bytes)
+    end
+  end
+
   # ZMTP commands. A command is carried in a COMMAND-flagged frame.
   # Layout inside the frame payload:
   #   name-length (1 byte) + name (ASCII) + command-specific body

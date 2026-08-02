@@ -8,12 +8,14 @@ module OMQ
     class XPub < Strategy
       getter tx : Channel(Message)
       getter rx : Channel(Message)
+      getter subscriber_joined : Channel(Pipe)
 
       record PeerSlot, pipe : Pipe, drop : DropQueue(Message)?
 
       def initialize(capacity : Int32, @conflate : Bool = false, @on_mute : Options::MuteStrategy = Options::MuteStrategy::Block)
         @tx = Channel(Message).new(capacity)
         @rx = Channel(Message).new(capacity)
+        @subscriber_joined = Channel(Pipe).new(128)
         @peer_slots = [] of PeerSlot
         @pipes_mutex = Mutex.new
         @closed = Atomic(Bool).new(false)
@@ -37,12 +39,14 @@ module OMQ
         slot = build_slot(pipe)
         @pipes_mutex.synchronize { @peer_slots << slot }
         spawn recv_pump(pipe)
+        spawn command_listener(pipe)
       end
 
       def close : Nil
         return unless close_once
         @tx.close
         @rx.close
+        @subscriber_joined.close
         @pipes_mutex.synchronize do
           @peer_slots.each { |s| s.drop.try(&.close) }
         end
@@ -77,6 +81,36 @@ module OMQ
             break
           end
         end
+      end
+
+      private def command_listener(pipe : Pipe) : Nil
+        commands = pipe.commands_rx
+        return unless commands
+        while event = commands.receive?
+          case event.name
+          when "SUBSCRIBE"
+            notify_subscriber_joined(pipe)
+            send_subscription_marker(0x01_u8, event.body)
+          when "CANCEL"
+            send_subscription_marker(0x00_u8, event.body)
+          end
+        end
+      end
+
+      private def notify_subscriber_joined(pipe : Pipe) : Nil
+        select
+        when @subscriber_joined.send(pipe)
+        else
+        end
+      rescue Channel::ClosedError
+      end
+
+      private def send_subscription_marker(marker : UInt8, prefix : Bytes) : Nil
+        frame = Bytes.new(prefix.size + 1)
+        frame[0] = marker
+        prefix.copy_to(frame + 1) if prefix.size > 0
+        @rx.send(Message{frame})
+      rescue Channel::ClosedError
       end
 
       private def dispatcher : Nil

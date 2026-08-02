@@ -1,14 +1,15 @@
 module OMQ
   module Routing
     # RADIO routing: broadcast `[group, body]` to every attached DISH
-    # peer. v0.1 does not yet track JOIN/LEAVE per-peer — messages go
-    # to all peers and DISH filters locally. Matches the simplified
-    # PUB/SUB story for the non-draft counterpart.
+    # peer. JOIN/LEAVE commands are observed for readiness parity with
+    # Ruby OMQ, while group filtering still happens on the DISH side.
     class Radio < Strategy
       getter tx : ::Channel(Message)
+      getter subscriber_joined : ::Channel(Pipe)
 
       def initialize(capacity : Int32)
         @tx = ::Channel(Message).new(capacity)
+        @subscriber_joined = ::Channel(Pipe).new(128)
         @pipes = [] of Pipe
         @pipes_mutex = Mutex.new
         @closed = Atomic(Bool).new(false)
@@ -23,11 +24,30 @@ module OMQ
       def attach(pipe : Pipe) : Nil
         return if closed?
         @pipes_mutex.synchronize { @pipes << pipe }
+        spawn command_listener(pipe)
       end
 
       def close : Nil
         return unless close_once
         @tx.close
+        @subscriber_joined.close
+      end
+
+      private def command_listener(pipe : Pipe) : Nil
+        commands = pipe.commands_rx
+        return unless commands
+        while event = commands.receive?
+          next unless event.name == "JOIN"
+          notify_subscriber_joined(pipe)
+        end
+      end
+
+      private def notify_subscriber_joined(pipe : Pipe) : Nil
+        select
+        when @subscriber_joined.send(pipe)
+        else
+        end
+      rescue ::Channel::ClosedError
       end
 
       private def dispatcher : Nil

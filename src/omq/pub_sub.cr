@@ -38,6 +38,10 @@ module OMQ
       send(msg)
     end
 
+    def subscriber_joined : Channel(Pipe)
+      @strategy.subscriber_joined
+    end
+
     protected def socket_type : String
       SOCKET_TYPE
     end
@@ -62,10 +66,9 @@ module OMQ
     end
   end
 
-  # XPUB: like PUB, but subscribe/cancel messages sent by XSUB peers
-  # surface on `#receive` as raw data frames (first byte 0x01 = subscribe,
-  # 0x00 = cancel; ZMTP 3.0 legacy encoding). No server-side filtering in
-  # v0.1 — every published message reaches every peer.
+  # XPUB: like PUB, but subscribe/cancel messages sent by peers surface
+  # on `#receive` as raw data frames (first byte 0x01 = subscribe,
+  # 0x00 = cancel). Every published message reaches every peer.
   class XPUB < Socket
     include QueueReadable
     include QueueWritable
@@ -103,6 +106,10 @@ module OMQ
 
     def <<(msg) : self
       send(msg)
+    end
+
+    def subscriber_joined : Channel(Pipe)
+      @strategy.subscriber_joined
     end
 
     def receive : Message

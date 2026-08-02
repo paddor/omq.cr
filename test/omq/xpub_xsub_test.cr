@@ -47,6 +47,25 @@ describe "XPUB/XSUB" do
     end
   end
 
+  it "surfaces command-form SUB subscribe events on XPUB rx" do
+    OMQ::TestHelper.with_timeout(3.seconds) do
+      xpub = OMQ::XPUB.bind("tcp://127.0.0.1:0")
+      port = xpub.port.not_nil!
+      sub = OMQ::SUB.connect("tcp://127.0.0.1:#{port}", subscribe: "topic")
+
+      event = xpub.receive
+      assert_equal 1, event.size
+      assert_equal 0x01_u8, event[0][0]
+      assert_equal "topic", String.new(event[0][1..])
+
+      pipe = xpub.subscriber_joined.receive
+      refute pipe.closed?
+
+      xpub.close
+      sub.close
+    end
+  end
+
   it "XSUB broadcasts outbound sends to every connected XPUB" do
     OMQ::TestHelper.with_timeout(2.seconds) do
       pub1 = OMQ::XPUB.bind("inproc://xpx-bcast-1")

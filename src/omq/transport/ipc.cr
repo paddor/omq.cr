@@ -96,11 +96,12 @@ module OMQ
         tx = Channel(Message).new(send_capacity)
         rx = Channel(Message).new(recv_capacity)
         commands_tx = Channel(Bytes).new(send_capacity)
+        commands_rx = Channel(ZMTP::CommandEvent).new(recv_capacity)
         send_done = Channel(Nil).new
         close_signal = Channel(Nil).new
 
         spawn write_pump(zmtp, tx, rx, commands_tx, send_done, close_signal)
-        spawn read_pump(zmtp, rx, tx, close_signal)
+        spawn read_pump(zmtp, rx, tx, commands_rx, close_signal)
         # PING/PONG is a ZMTP 3.1 addition; skip against 3.0 peers.
         if (interval = heartbeat_interval) && zmtp.peer_minor >= 1
           spawn Transport.heartbeat_pump(
@@ -111,7 +112,14 @@ module OMQ
           )
         end
 
-        pipe = Pipe.new(tx: tx, rx: rx, send_done: send_done, commands_tx: commands_tx, close_signal: close_signal)
+        pipe = Pipe.new(
+          tx: tx,
+          rx: rx,
+          send_done: send_done,
+          commands_tx: commands_tx,
+          commands_rx: commands_rx,
+          close_signal: close_signal,
+        )
         pipe.peer_zmtp_minor = zmtp.peer_minor
         if identity = zmtp.peer_properties["Identity"]?
           pipe.peer_identity = identity
@@ -139,11 +147,22 @@ module OMQ
         zmtp.close
       end
 
-      private def read_pump(zmtp : ZMTP::Connection, rx : Channel(Message), tx : Channel(Message), close_signal : Channel(Nil)) : Nil
+      private def read_pump(
+        zmtp : ZMTP::Connection,
+        rx : Channel(Message),
+        tx : Channel(Message),
+        commands_rx : Channel(ZMTP::CommandEvent),
+        close_signal : Channel(Nil),
+      ) : Nil
         messages_since_yield = 0
         bytes_since_yield = 0
         loop do
-          msg = zmtp.receive_message
+          msg = zmtp.receive_message do |name, body|
+            begin
+              commands_rx.send(ZMTP::CommandEvent.new(name, body))
+            rescue Channel::ClosedError
+            end
+          end
           break unless msg
           begin
             rx.send(msg)
@@ -164,6 +183,7 @@ module OMQ
         close_signal.close unless close_signal.closed?
         rx.close
         tx.close
+        commands_rx.close unless commands_rx.closed?
         zmtp.close
       end
     end

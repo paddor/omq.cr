@@ -16,6 +16,19 @@ private def collect(sub : OMQ::SUB) : Channel(OMQ::Message)
 end
 
 describe "PUB/SUB over inproc" do
+  it "signals when a subscriber joins" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      pub = OMQ::PUB.bind("inproc://ps-subscriber-joined")
+      sub = OMQ::SUB.connect("inproc://ps-subscriber-joined", subscribe: "topic")
+
+      pipe = pub.subscriber_joined.receive
+      refute pipe.closed?
+
+      sub.close
+      pub.close
+    end
+  end
+
   it "delivers to a subscriber of the matching prefix" do
     OMQ::TestHelper.with_timeout(2.seconds) do
       pub = OMQ::PUB.bind("inproc://ps-basic")
@@ -155,6 +168,20 @@ describe "PUB/SUB over inproc" do
 end
 
 describe "PUB/SUB over TCP" do
+  it "signals command-form SUBSCRIBE from a TCP subscriber" do
+    OMQ::TestHelper.with_timeout(3.seconds) do
+      pub = OMQ::PUB.bind("tcp://127.0.0.1:0")
+      port = pub.port.not_nil!
+      sub = OMQ::SUB.connect("tcp://127.0.0.1:#{port}", subscribe: "tcp.")
+
+      pipe = pub.subscriber_joined.receive
+      refute pipe.closed?
+
+      sub.close
+      pub.close
+    end
+  end
+
   it "filters by prefix across TCP" do
     OMQ::TestHelper.with_timeout(3.seconds) do
       pub = OMQ::PUB.bind("tcp://127.0.0.1:0")

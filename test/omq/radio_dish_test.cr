@@ -2,6 +2,20 @@ require "../test_helper"
 require "../../src/omq/radio_dish"
 
 describe "RADIO/DISH over inproc" do
+  it "signals when a dish joins" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      radio = OMQ::RADIO.bind("inproc://rd-subscriber-joined")
+      dish = OMQ::DISH.connect("inproc://rd-subscriber-joined")
+      dish.join("weather")
+
+      pipe = radio.subscriber_joined.receive
+      refute pipe.closed?
+
+      radio.close
+      dish.close
+    end
+  end
+
   it "delivers only joined groups to the DISH" do
     OMQ::TestHelper.with_timeout(2.seconds) do
       radio = OMQ::RADIO.bind("inproc://rd-basic")

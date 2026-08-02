@@ -4,8 +4,8 @@ require "./routing/dish"
 
 module OMQ
   # RADIO (draft, ZeroMQ RFC 48): group-based publisher. Every message
-  # is a 2-frame `[group, body]`. v0.1 broadcasts to every peer and
-  # leaves group-filtering to DISH.
+  # is a 2-frame `[group, body]`. Broadcasts to every peer and leaves
+  # group filtering to DISH.
   class RADIO < Socket
     @@default_action = :bind
 
@@ -24,6 +24,10 @@ module OMQ
 
     def publish(group : String, body : Bytes) : self
       send_frames([group.to_slice, body])
+    end
+
+    def subscriber_joined : ::Channel(Pipe)
+      @strategy.subscriber_joined
     end
 
     protected def socket_type : String
