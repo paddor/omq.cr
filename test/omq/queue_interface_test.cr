@@ -36,13 +36,26 @@ describe "QueueReadable" do
     OMQ::TestHelper.with_timeout(2.seconds) do
       pull = OMQ::PULL.bind("inproc://qi-wait", read_timeout: 50.milliseconds)
       push = OMQ::PUSH.connect("inproc://qi-wait")
+      done = Channel(OMQ::Message | Exception).new(1)
 
       spawn do
-        sleep 100.milliseconds
-        push.send("hello")
+        done.send(pull.wait)
+      rescue ex
+        done.send(ex)
       end
 
-      assert_equal "hello", String.new(pull.wait[0])
+      select
+      when early = done.receive
+        raise early if early.is_a?(Exception)
+        raise "#wait returned before a message was sent"
+      when timeout(100.milliseconds)
+      end
+
+      push.send("hello")
+      result = done.receive
+      raise result if result.is_a?(Exception)
+
+      assert_equal "hello", String.new(result[0])
 
       push.close
       pull.close
