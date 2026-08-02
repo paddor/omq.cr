@@ -68,7 +68,7 @@ module OMQ
 
   # XPUB: like PUB, but subscribe/cancel messages sent by peers surface
   # on `#receive` as raw data frames (first byte 0x01 = subscribe,
-  # 0x00 = cancel). Every published message reaches every peer.
+  # 0x00 = cancel). Published messages go to matching peers.
   class XPUB < Socket
     include QueueReadable
     include QueueWritable

@@ -67,7 +67,7 @@ describe "Reconnect after TCP server restart for draft sockets" do
       port = radio.port.not_nil!
       dish = OMQ::DISH.connect("tcp://127.0.0.1:#{port}", linger: 0.seconds, reconnect_interval: 20.milliseconds, read_timeout: 1.second)
       dish.join("g")
-      OMQ::TestHelper.wait_until { dish.peer_count > 0 && radio.peer_count > 0 }
+      radio.subscriber_joined.receive
 
       radio.publish("g", "first")
       assert_equal ["g", "first"], dish.receive.map { |frame| String.new(frame) }
@@ -75,7 +75,7 @@ describe "Reconnect after TCP server restart for draft sockets" do
       radio.close
       OMQ::TestHelper.wait_disconnected(dish)
       radio2 = OMQ::TestHelper.restart_bind_tcp(OMQ::RADIO, port)
-      OMQ::TestHelper.wait_until { dish.peer_count > 0 && radio2.peer_count > 0 }
+      radio2.subscriber_joined.receive
 
       radio2.publish("g", "second")
       assert_equal ["g", "second"], dish.receive.map { |frame| String.new(frame) }

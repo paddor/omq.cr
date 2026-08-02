@@ -170,7 +170,7 @@ describe "Reconnect after TCP server restart" do
         read_timeout: 1.second,
         subscribe: "",
       )
-      OMQ::TestHelper.wait_until { sub.peer_count > 0 && pub.peer_count > 0 }
+      pub.subscriber_joined.receive
 
       pub.send("first")
       assert_equal "first", String.new(sub.receive[0])
@@ -178,7 +178,7 @@ describe "Reconnect after TCP server restart" do
       pub.close
       OMQ::TestHelper.wait_disconnected(sub)
       pub2 = OMQ::TestHelper.restart_bind_tcp(OMQ::PUB, port)
-      OMQ::TestHelper.wait_until { sub.peer_count > 0 && pub2.peer_count > 0 }
+      pub2.subscriber_joined.receive
 
       pub2.send("second")
       assert_equal "second", String.new(sub.receive[0])

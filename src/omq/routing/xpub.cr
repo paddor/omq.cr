@@ -18,6 +18,8 @@ module OMQ
         @subscriber_joined = Channel(Pipe).new(128)
         @peer_slots = [] of PeerSlot
         @pipes_mutex = Mutex.new
+        @subscriptions = {} of Pipe => Array(Bytes)
+        @subscriptions_mutex = Mutex.new
         @closed = Atomic(Bool).new(false)
         @peer_hwm = capacity
       end
@@ -37,7 +39,10 @@ module OMQ
       def attach(pipe : Pipe) : Nil
         return if closed?
         slot = build_slot(pipe)
-        @pipes_mutex.synchronize { @peer_slots << slot }
+        @pipes_mutex.synchronize do
+          @peer_slots << slot
+          @subscriptions_mutex.synchronize { @subscriptions[pipe] = [] of Bytes }
+        end
         spawn recv_pump(pipe)
         spawn command_listener(pipe)
       end
@@ -71,16 +76,22 @@ module OMQ
             break
           end
         end
+      ensure
+        drop.close
+        remove_pipe(pipe)
       end
 
       private def recv_pump(pipe : Pipe) : Nil
         while msg = pipe.rx.receive?
+          track_legacy_subscription(pipe, msg)
           begin
             @rx.send(msg)
           rescue Channel::ClosedError
             break
           end
         end
+      ensure
+        remove_pipe(pipe)
       end
 
       private def command_listener(pipe : Pipe) : Nil
@@ -89,12 +100,60 @@ module OMQ
         while event = commands.receive?
           case event.name
           when "SUBSCRIBE"
-            notify_subscriber_joined(pipe)
+            subscribe(pipe, event.body)
             send_subscription_marker(0x01_u8, event.body)
           when "CANCEL"
+            unsubscribe(pipe, event.body)
             send_subscription_marker(0x00_u8, event.body)
           end
         end
+      ensure
+        remove_pipe(pipe)
+      end
+
+      private def track_legacy_subscription(pipe : Pipe, msg : Message) : Nil
+        frame = msg.first? || return
+        return if frame.empty?
+        prefix = frame[1..]
+        case frame[0]
+        when 0x01_u8
+          subscribe(pipe, prefix)
+        when 0x00_u8
+          unsubscribe(pipe, prefix)
+        end
+      end
+
+      private def subscribe(pipe : Pipe, prefix : Bytes) : Nil
+        @subscriptions_mutex.synchronize do
+          prefixes = @subscriptions[pipe]? || return
+          return if prefixes.any? { |p| p == prefix }
+          prefixes << prefix.dup
+        end
+        notify_subscriber_joined(pipe)
+      end
+
+      private def unsubscribe(pipe : Pipe, prefix : Bytes) : Nil
+        @subscriptions_mutex.synchronize do
+          prefixes = @subscriptions[pipe]? || return
+          prefixes.reject! { |p| p == prefix }
+        end
+      end
+
+      private def subscribed?(pipe : Pipe, topic : Bytes) : Bool
+        @subscriptions_mutex.synchronize do
+          prefixes = @subscriptions[pipe]?
+          return false unless prefixes
+          prefixes.any? do |prefix|
+            prefix.empty? || (prefix.size <= topic.size && topic[0, prefix.size] == prefix)
+          end
+        end
+      end
+
+      private def remove_pipe(pipe : Pipe) : Nil
+        @pipes_mutex.synchronize do
+          @peer_slots.reject! { |slot| slot.pipe == pipe }
+        end
+        @subscriptions_mutex.synchronize { @subscriptions.delete(pipe) }
       end
 
       private def notify_subscriber_joined(pipe : Pipe) : Nil
@@ -115,11 +174,13 @@ module OMQ
 
       private def dispatcher : Nil
         while msg = @tx.receive?
+          topic = msg.first? || Bytes.empty
           if @conflate
             loop do
               select
               when newer = @tx.receive
                 msg = newer
+                topic = msg.first? || Bytes.empty
               else
                 break
               end
@@ -128,13 +189,14 @@ module OMQ
 
           snapshot = @pipes_mutex.synchronize { @peer_slots.dup }
           snapshot.each do |slot|
+            next unless subscribed?(slot.pipe, topic)
             if drop = slot.drop
               drop.push(msg)
             else
               begin
                 slot.pipe.tx.send(msg)
               rescue Channel::ClosedError
-                @pipes_mutex.synchronize { @peer_slots.delete(slot) }
+                remove_pipe(slot.pipe)
               end
             end
           end

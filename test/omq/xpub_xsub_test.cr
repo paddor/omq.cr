@@ -8,8 +8,9 @@ describe "XPUB/XSUB" do
       sub2 = OMQ::XSUB.new
       sub1.connect("inproc://xpx-fanout")
       sub2.connect("inproc://xpx-fanout")
-
-      OMQ::TestHelper.wait_until { xpub.peer_count == 2 && sub1.peer_count == 1 && sub2.peer_count == 1 }
+      sub1.subscribe("")
+      sub2.subscribe("")
+      2.times { xpub.subscriber_joined.receive }
 
       xpub.send("hello")
 
@@ -19,6 +20,22 @@ describe "XPUB/XSUB" do
       xpub.close
       sub1.close
       sub2.close
+    end
+  end
+
+  it "does not send data to unsubscribed XSUB peers" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      xpub = OMQ::XPUB.bind("inproc://xpx-filter")
+      sub = OMQ::XSUB.connect("inproc://xpx-filter")
+      sub.read_timeout = 50.milliseconds
+
+      OMQ::TestHelper.wait_until { xpub.peer_count == 1 && sub.peer_count == 1 }
+      xpub.send("dropped")
+
+      assert_raises(IO::TimeoutError) { sub.receive }
+
+      xpub.close
+      sub.close
     end
   end
 
