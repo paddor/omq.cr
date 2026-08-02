@@ -280,6 +280,17 @@ describe "PUB/SUB options" do
     xpub.try(&.close)
   end
 
+  it "closes subscriber readiness channels on close" do
+    pub = OMQ::PUB.new
+    xpub = OMQ::XPUB.new
+
+    pub.close
+    xpub.close
+
+    assert pub.subscriber_joined.closed?
+    assert xpub.subscriber_joined.closed?
+  end
+
   it "SUB and XSUB default to block on mute" do
     sub = OMQ::SUB.new
     xsub = OMQ::XSUB.new

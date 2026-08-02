@@ -61,4 +61,12 @@ describe "RADIO/DISH over inproc" do
       dish.close
     end
   end
+
+  it "closes subscriber readiness channel on close" do
+    radio = OMQ::RADIO.new
+
+    radio.close
+
+    assert radio.subscriber_joined.closed?
+  end
 end

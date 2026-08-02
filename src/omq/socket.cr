@@ -225,7 +225,7 @@ module OMQ
     end
 
     private def emit_monitor(kind : MonitorEvent::Kind, endpoint : String, pipe : Pipe? = nil, error : Exception? = nil) : Nil
-      ch = @monitor
+      ch = @state_mutex.synchronize { @monitor }
       return unless ch
       return if ch.closed?
       ev = MonitorEvent.new(kind, endpoint, pipe, error)
