@@ -9,7 +9,7 @@ describe "PUB on_mute" do
 
       sub = OMQ::SUB.connect("inproc://default-drop-newest", subscribe: "")
 
-      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
+      pub.subscriber_joined.receive
 
       total = 2000
       total.times { |i| pub.send("msg-#{i}") }
@@ -41,7 +41,7 @@ describe "PUB on_mute" do
       sub.connect("inproc://drop-newest")
       sub.subscribe("")
 
-      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
+      pub.subscriber_joined.receive
 
       # Fire far more than the HWM into a subscriber that isn't reading.
       1000.times { |i| pub.send("msg-#{i}") }
@@ -74,7 +74,7 @@ describe "PUB on_mute" do
       sub.connect("inproc://drop-oldest")
       sub.subscribe("")
 
-      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
+      pub.subscriber_joined.receive
 
       1000.times { |i| pub.send("msg-#{i}") }
 
@@ -104,7 +104,7 @@ describe "PUB on_mute" do
       sub.connect("inproc://block-mute")
       sub.subscribe("")
 
-      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
+      pub.subscriber_joined.receive
 
       20.times { |i| pub.send("msg-#{i}") }
 

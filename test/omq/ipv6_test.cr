@@ -50,7 +50,7 @@ describe "IPv6" do
       pub = OMQ::PUB.bind("tcp://[::1]:0")
       port = pub.port.not_nil!
       sub = OMQ::SUB.connect("tcp://[::1]:#{port}", subscribe: "topic.")
-      OMQ::TestHelper.wait_until { pub.peer_count > 0 && sub.peer_count > 0 }
+      pub.subscriber_joined.receive
 
       pub.send("topic.data")
       assert_equal "topic.data", String.new(sub.receive[0])

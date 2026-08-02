@@ -35,22 +35,13 @@ describe "PUB/SUB over inproc" do
       sub = OMQ::SUB.new
       sub.subscribe("weather.")
       sub.connect("inproc://ps-basic")
-      ch = collect(sub)
 
-      delivered = nil
-      20.times do |i|
-        pub.send(["weather.ca".to_slice, "sunny #{i}".to_slice])
-        select
-        when msg = ch.receive
-          delivered = msg
-          break
-        when timeout(20.milliseconds)
-        end
-      end
+      pub.subscriber_joined.receive
 
-      refute_nil delivered
-      msg = delivered.not_nil!
+      pub.send(["weather.ca".to_slice, "sunny".to_slice])
+      msg = sub.receive
       assert_equal "weather.ca", String.new(msg[0])
+      assert_equal "sunny", String.new(msg[1])
 
       sub.close
       pub.close
@@ -65,7 +56,7 @@ describe "PUB/SUB over inproc" do
       sub.connect("inproc://ps-filter")
       ch = collect(sub)
 
-      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
+      pub.subscriber_joined.receive
 
       100.times do
         pub.send(["A.one".to_slice, "payload".to_slice])
@@ -105,7 +96,7 @@ describe "PUB/SUB over inproc" do
       sub.connect("inproc://ps-catchall")
       ch = collect(sub)
 
-      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
+      pub.subscriber_joined.receive
 
       got_any = false
       30.times do
@@ -131,7 +122,7 @@ describe "PUB/SUB over inproc" do
       pub = OMQ::PUB.bind("inproc://ps-fanout")
       subs = Array.new(3) { OMQ::SUB.connect("inproc://ps-fanout", subscribe: "") }
 
-      OMQ::TestHelper.wait_until { pub.peer_count == 3 && subs.all? { |sub| sub.peer_count == 1 } }
+      3.times { pub.subscriber_joined.receive }
 
       pub.send(["broadcast".to_slice, "payload".to_slice])
 
@@ -152,7 +143,8 @@ describe "PUB/SUB over inproc" do
       sub.connect("inproc://ps-source-1")
       sub.connect("inproc://ps-source-2")
 
-      OMQ::TestHelper.wait_until { pub1.peer_count == 1 && pub2.peer_count == 1 && sub.peer_count == 2 }
+      pub1.subscriber_joined.receive
+      pub2.subscriber_joined.receive
 
       pub1.send("from-1")
       pub2.send("from-2")
@@ -191,7 +183,7 @@ describe "PUB/SUB over TCP" do
       sub.connect("tcp://127.0.0.1:#{port}")
       ch = collect(sub)
 
-      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
+      pub.subscriber_joined.receive
 
       50.times do
         pub.send(["hot.news".to_slice, "body".to_slice])
@@ -231,7 +223,7 @@ describe "PUB/SUB over TCP" do
         OMQ::SUB.connect("tcp://127.0.0.1:#{port}", subscribe: "", read_timeout: 1.second)
       end
 
-      OMQ::TestHelper.wait_until { pub.peer_count == 3 && subs.all? { |sub| sub.peer_count == 1 } }
+      3.times { pub.subscriber_joined.receive }
 
       pub.send(["broadcast".to_slice, "payload".to_slice])
 
@@ -255,7 +247,7 @@ describe "PUB/SUB over IPC" do
       pub = OMQ::PUB.bind(endpoint)
       subs = Array.new(3) { OMQ::SUB.connect(endpoint, subscribe: "", read_timeout: 1.second) }
 
-      OMQ::TestHelper.wait_until { pub.peer_count == 3 && subs.all? { |sub| sub.peer_count == 1 } }
+      3.times { pub.subscriber_joined.receive }
 
       pub.send(["broadcast".to_slice, "payload".to_slice])
 
@@ -318,7 +310,7 @@ describe "PUB/SUB options" do
       sub.connect("inproc://pubsub-unbounded")
       sub.subscribe("")
 
-      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
+      pub.subscriber_joined.receive
 
       pub.send("hello")
 

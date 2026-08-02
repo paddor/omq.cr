@@ -86,7 +86,7 @@ describe "Stress tests" do
         OMQ::SUB.connect("inproc://stress-pubsub", subscribe: "", read_timeout: 1.second)
       end
 
-      OMQ::TestHelper.wait_until { pub.peer_count == sub_count && subs.all? { |sub| sub.peer_count == 1 } }
+      sub_count.times { pub.subscriber_joined.receive }
 
       total.times { |i| pub.send("msg-#{i}") }
       subs.each do |sub|

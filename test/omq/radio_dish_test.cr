@@ -22,7 +22,7 @@ describe "RADIO/DISH over inproc" do
       dish = OMQ::DISH.connect("inproc://rd-basic")
       dish.join("weather")
 
-      OMQ::TestHelper.wait_until { radio.peer_count == 1 && dish.peer_count == 1 }
+      radio.subscriber_joined.receive
 
       radio.publish("sports", "ignored")
       radio.publish("weather", "sunny")
@@ -47,7 +47,7 @@ describe "RADIO/DISH over inproc" do
       radio = OMQ::RADIO.bind("inproc://rd-leave")
       dish = OMQ::DISH.connect("inproc://rd-leave")
       dish.join("a").join("b")
-      OMQ::TestHelper.wait_until { radio.peer_count == 1 && dish.peer_count == 1 }
+      radio.subscriber_joined.receive
 
       radio.publish("a", "first")
       assert_equal "first", String.new(dish.receive[1])
