@@ -1,7 +1,6 @@
 require "./system_test_helper"
 require "../../src/omq/radio_dish"
 
-
 describe "Crystal DISH ↔ Ruby RADIO over TCP" do
   it "receives only messages for the joined group" do
     if OMQ::SystemTestHelper.ruby_bin.nil?
@@ -20,7 +19,7 @@ describe "Crystal DISH ↔ Ruby RADIO over TCP" do
         expected.each do |want|
           msg = dish.receive
           assert_equal "weather", String.new(msg[0])
-          assert_equal want,      String.new(msg[1])
+          assert_equal want, String.new(msg[1])
         end
 
         dish.close

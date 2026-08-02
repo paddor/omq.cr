@@ -13,7 +13,6 @@ describe "PUB on_mute" do
 
       total = 2000
       total.times { |i| pub.send("msg-#{i}") }
-      Fiber.yield
 
       sub.read_timeout = 50.milliseconds
       received = [] of String
@@ -47,9 +46,6 @@ describe "PUB on_mute" do
       # Fire far more than the HWM into a subscriber that isn't reading.
       1000.times { |i| pub.send("msg-#{i}") }
 
-      # Let the dispatcher drain into the per-peer DropQueue.
-      Fiber.yield
-
       sub.read_timeout = 50.milliseconds
       received = [] of String
       loop do
@@ -81,8 +77,6 @@ describe "PUB on_mute" do
       OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
 
       1000.times { |i| pub.send("msg-#{i}") }
-
-      Fiber.yield
 
       sub.read_timeout = 50.milliseconds
       received = [] of String

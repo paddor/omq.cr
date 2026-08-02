@@ -1,6 +1,5 @@
 require "./system_test_helper"
 
-
 describe "Ruby PUB ↔ Crystal SUB over TCP" do
   it "subscribes to a topic and receives every matching message" do
     if OMQ::SystemTestHelper.ruby_bin.nil?
