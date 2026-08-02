@@ -60,19 +60,30 @@ jobs:
           # Pull the section for this version, or fall back to [Unreleased].
           # Keep-a-Changelog sections start with `## [<ver>]` and end at the
           # next `## ` heading.
-          awk -v ver="$version" '
-            /^## / {
-              if (in_section) exit
-              if ($0 ~ "\\[" ver "\\]" || $0 ~ "\\[Unreleased\\]") {
-                in_section = 1
-                next
+          extract_section() {
+            awk -v section="$1" '
+              /^## / {
+                if (in_section) exit
+                if ($0 ~ "\\[" section "\\]") {
+                  in_section = 1
+                  next
+                }
               }
-            }
-            in_section { print }
-          ' CHANGELOG.md >RELEASE_NOTES.md
-          if [ ! -s RELEASE_NOTES.md ]; then
+              in_section { print }
+            ' CHANGELOG.md
+          }
+
+          extract_section "$version" >RELEASE_NOTES.md
+          if ! grep -q '[^[:space:]]' RELEASE_NOTES.md; then
+            extract_section "Unreleased" >RELEASE_NOTES.md
+          fi
+          if ! grep -q '[^[:space:]]' RELEASE_NOTES.md; then
             echo "No CHANGELOG section for $version — using tag message" >&2
             git tag -l --format='%(contents)' "$GITHUB_REF_NAME" >RELEASE_NOTES.md
+          fi
+          if ! grep -q '[^[:space:]]' RELEASE_NOTES.md; then
+            echo "No release notes found for $version" >&2
+            exit 1
           fi
           echo "---- RELEASE_NOTES.md ----"
           cat RELEASE_NOTES.md
