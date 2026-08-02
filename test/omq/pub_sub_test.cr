@@ -313,4 +313,27 @@ describe "DropQueue" do
     assert queue.closed?
     assert_nil queue.receive?
   end
+
+  it "close is safe from multiple fibers" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      queue = OMQ::DropQueue(String).new(1, OMQ::Options::MuteStrategy::DropNewest)
+      done = Channel(Exception?).new(20)
+
+      20.times do
+        spawn do
+          queue.close
+          done.send(nil)
+        rescue ex
+          done.send(ex)
+        end
+      end
+
+      20.times do
+        ex = done.receive
+        raise ex if ex
+      end
+      assert queue.closed?
+      assert_nil queue.receive?
+    end
+  end
 end

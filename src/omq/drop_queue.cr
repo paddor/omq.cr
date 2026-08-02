@@ -58,13 +58,18 @@ module OMQ
         return nil if was_closed
 
         @signal.receive?
-        return nil if @closed && @mutex.synchronize { @items.empty? }
+        return nil if @mutex.synchronize { @closed && @items.empty? }
       end
     end
 
     def close : Nil
-      @mutex.synchronize { @closed = true }
-      @signal.close unless @signal.closed?
+      first_close = @mutex.synchronize do
+        already_closed = @closed
+        @closed = true
+        !already_closed
+      end
+      @signal.close if first_close
+    rescue Channel::ClosedError
     end
 
     def closed? : Bool
