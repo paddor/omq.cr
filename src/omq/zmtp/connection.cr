@@ -55,10 +55,16 @@ module OMQ::ZMTP
     # Send one multipart message.
     def send_message(parts : Message) : Nil
       @write_mutex.synchronize do
-        last = parts.size - 1
-        parts.each_with_index do |part, i|
-          write_frame(part, more: i < last, command: false)
-        end
+        write_message(parts)
+        flush
+      end
+    end
+
+    # Send a contiguous batch of data messages. Transport write pumps use
+    # this to amortize kernel writes for tiny queued frames.
+    def send_messages(messages : Array(Message)) : Nil
+      @write_mutex.synchronize do
+        messages.each { |parts| write_message(parts) }
         flush
       end
     end
@@ -91,6 +97,13 @@ module OMQ::ZMTP
         Frame.encode(@io, body, command: true)
       else
         Frame.encode(@io, payload, more: more, command: command)
+      end
+    end
+
+    private def write_message(parts : Message) : Nil
+      last = parts.size - 1
+      parts.each_with_index do |part, i|
+        write_frame(part, more: i < last, command: false)
       end
     end
 

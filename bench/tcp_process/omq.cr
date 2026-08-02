@@ -220,20 +220,27 @@ module OMQ::TcpProcessBench
     end
     puts "READY"
 
-    received = Channel(Nil).new(1024)
+    received = Atomic(Int64).new(0)
+    done = Channel(Nil).new(1)
+    finished = Atomic(Bool).new(false)
+
     pulls.each do |pull|
       spawn do
         begin
           loop do
             pull.receive
-            received.send(nil)
+            if received.add(1) + 1 >= messages
+              _, sent = finished.compare_and_set(false, true)
+              done.send(nil) if sent
+              break
+            end
           end
         rescue OMQ::ClosedError
         end
       end
     end
 
-    messages.times { received.receive }
+    done.receive
     pulls.each(&.close)
     puts "DONE"
   ensure

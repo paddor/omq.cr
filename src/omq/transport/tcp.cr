@@ -126,10 +126,12 @@ module OMQ
       # `send_done` on exit so `Pipe#await_drained` can observe when the
       # outgoing queue has been fully flushed (or the wire has gone away).
       private def write_pump(zmtp : ZMTP::Connection, tx : Channel(Message), rx : Channel(Message), commands_tx : Channel(Bytes), send_done : Channel(Nil), close_signal : Channel(Nil)) : Nil
+        batch = Array(Message).new(WRITE_BATCH_MESSAGES)
         loop do
           select
           when msg = tx.receive
-            zmtp.send_message(msg)
+            Transport.drain_data_batch(msg, tx, batch)
+            zmtp.send_messages(batch)
           when cmd = commands_tx.receive
             zmtp.send_command(cmd)
           end
