@@ -101,4 +101,24 @@ module OMQ::TestHelper
       end
     end
   end
+
+  def self.refute_monitor_event(
+    events : Channel(OMQ::MonitorEvent),
+    kind : OMQ::MonitorEvent::Kind,
+    span : Time::Span,
+  ) : Nil
+    deadline = Time.instant + span
+    loop do
+      remaining = deadline - Time.instant
+      return unless remaining.positive?
+
+      select
+      when event = events.receive?
+        raise "monitor closed while waiting for absence of #{kind}" unless event
+        raise "unexpected monitor event #{kind}" if event.kind == kind
+      when timeout(remaining)
+        return
+      end
+    end
+  end
 end

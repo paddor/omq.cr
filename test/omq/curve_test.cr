@@ -71,6 +71,7 @@ describe "CURVE encryption" do
       port = pull.port.not_nil!
 
       push = OMQ::PUSH.new
+      events = push.monitor
       push.mechanism = OMQ::ZMTP::Mechanism::Curve.client(server_key: server_pub)
       push.heartbeat_interval = 40.milliseconds
       push.heartbeat_timeout = 150.milliseconds
@@ -80,7 +81,7 @@ describe "CURVE encryption" do
       push.send("first")
       assert_equal "first", String.new(pull.receive[0])
 
-      sleep 220.milliseconds
+      OMQ::TestHelper.refute_monitor_event(events, OMQ::MonitorEvent::Kind::Disconnected, 220.milliseconds)
       assert_equal 1, push.peer_count
       assert_equal 1, pull.peer_count
 

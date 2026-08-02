@@ -7,6 +7,7 @@ describe "Heartbeat" do
       port = pull.port.not_nil!
 
       push = OMQ::PUSH.new
+      events = push.monitor
       push.heartbeat_interval = 50.milliseconds
       push.connect("tcp://127.0.0.1:#{port}")
 
@@ -18,7 +19,7 @@ describe "Heartbeat" do
       push.send("x")
       assert_equal "x", String.new(pull.receive[0])
 
-      sleep 300.milliseconds
+      OMQ::TestHelper.refute_monitor_event(events, OMQ::MonitorEvent::Kind::Disconnected, 300.milliseconds)
       assert_equal 1, push.peer_count
       assert_equal 1, pull.peer_count
 
