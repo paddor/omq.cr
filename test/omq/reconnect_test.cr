@@ -1,24 +1,9 @@
 require "../test_helper"
 
-private def free_tcp_port : Int32
-  server = TCPServer.new("127.0.0.1", 0)
-  port = server.local_address.port
-  server.close
-  port
-end
-
-private def wait_until(span : Time::Span = 2.seconds, &block : -> Bool) : Nil
-  deadline = Time.instant + span
-  until block.call
-    raise "timed out waiting for condition" if Time.instant >= deadline
-    sleep 1.millisecond
-  end
-end
-
 describe "Reconnect" do
   it "connects in the background when peer is absent at connect time (tcp)" do
     OMQ::TestHelper.with_timeout(5.seconds) do
-      port = free_tcp_port
+      port = OMQ::TestHelper.free_tcp_port
       push = OMQ::PUSH.new
       push.reconnect_interval = 50.milliseconds
       push.connect("tcp://127.0.0.1:#{port}")
@@ -26,9 +11,7 @@ describe "Reconnect" do
       pull = OMQ::PULL.new
       pull.bind("tcp://127.0.0.1:#{port}")
 
-      while push.peer_count.zero?
-        Fiber.yield
-      end
+      OMQ::TestHelper.wait_until { push.peer_count > 0 }
 
       push.send("hello")
       msg = pull.receive
@@ -41,22 +24,26 @@ describe "Reconnect" do
 
   it "keeps retrying while peer is down, connects when it comes up (tcp)" do
     OMQ::TestHelper.with_timeout(5.seconds) do
-      port = free_tcp_port
+      port = OMQ::TestHelper.free_tcp_port
+      endpoint = "tcp://127.0.0.1:#{port}"
 
       push = OMQ::PUSH.new
       push.reconnect_interval = 30.milliseconds
-      push.connect("tcp://127.0.0.1:#{port}")
+      events = push.monitor
+      push.connect(endpoint)
 
-      # Nothing listening yet; give the retry loop a few cycles.
-      sleep 120.milliseconds
+      delayed = OMQ::TestHelper.wait_monitor_event(events, OMQ::MonitorEvent::Kind::ConnectDelayed)
+      retried = OMQ::TestHelper.wait_monitor_event(events, OMQ::MonitorEvent::Kind::ConnectRetried)
+      assert_equal endpoint, delayed.endpoint
+      assert_equal endpoint, retried.endpoint
       assert push.peer_count.zero?
 
       pull = OMQ::PULL.new
-      pull.bind("tcp://127.0.0.1:#{port}")
+      pull.bind(endpoint)
 
-      while push.peer_count.zero? || pull.peer_count.zero?
-        Fiber.yield
-      end
+      connected = OMQ::TestHelper.wait_monitor_event(events, OMQ::MonitorEvent::Kind::Connected)
+      assert_equal endpoint, connected.endpoint
+      OMQ::TestHelper.wait_until { push.peer_count > 0 && pull.peer_count > 0 }
       push.send("connected")
       assert_equal "connected", String.new(pull.receive[0])
 
@@ -67,28 +54,29 @@ describe "Reconnect" do
 
   it "honors exponential backoff via Range(Time::Span, Time::Span)" do
     OMQ::TestHelper.with_timeout(5.seconds) do
-      port = free_tcp_port
+      port = OMQ::TestHelper.free_tcp_port
 
       push = OMQ::PUSH.new
       push.reconnect_interval = 20.milliseconds..80.milliseconds
-      started = Time.instant
+      events = push.monitor
       push.connect("tcp://127.0.0.1:#{port}")
 
-      # Give it enough time to attempt several reconnects and grow the delay.
-      sleep 300.milliseconds
+      delayed = OMQ::TestHelper.wait_monitor_event(events, OMQ::MonitorEvent::Kind::ConnectDelayed)
+      first = OMQ::TestHelper.wait_monitor_event(events, OMQ::MonitorEvent::Kind::ConnectRetried)
+      second = OMQ::TestHelper.wait_monitor_event(events, OMQ::MonitorEvent::Kind::ConnectRetried)
+      third = OMQ::TestHelper.wait_monitor_event(events, OMQ::MonitorEvent::Kind::ConnectRetried)
+      first_gap = first.at - delayed.at
+      second_gap = second.at - first.at
+      third_gap = third.at - second.at
 
-      pull = OMQ::PULL.new
-      pull.bind("tcp://127.0.0.1:#{port}")
-
-      while push.peer_count.zero?
-        Fiber.yield
-      end
-      elapsed = Time.instant - started
-      assert elapsed > 200.milliseconds,
-        "expected multiple retry waits, only #{elapsed.total_milliseconds.round(1)} ms elapsed"
+      assert first_gap >= 15.milliseconds,
+        "expected first retry after configured minimum, got #{first_gap.total_milliseconds.round(1)} ms"
+      assert second_gap >= 35.milliseconds,
+        "expected second retry to back off, got #{second_gap.total_milliseconds.round(1)} ms"
+      assert third_gap >= 70.milliseconds,
+        "expected third retry to cap near max, got #{third_gap.total_milliseconds.round(1)} ms"
 
       push.close
-      pull.close
     end
   end
 end
@@ -99,15 +87,15 @@ describe "Reconnect after TCP server restart" do
       server = OMQ::PAIR.bind("tcp://127.0.0.1:0", linger: 0.seconds)
       port = server.port.not_nil!
       client = OMQ::PAIR.connect("tcp://127.0.0.1:#{port}", linger: 0.seconds, reconnect_interval: 20.milliseconds)
-      wait_until { client.peer_count > 0 && server.peer_count > 0 }
+      OMQ::TestHelper.wait_until { client.peer_count > 0 && server.peer_count > 0 }
 
       client.send("one")
       assert_equal "one", String.new(server.receive[0])
 
       server.close
-      sleep 50.milliseconds
-      server2 = OMQ::PAIR.bind("tcp://127.0.0.1:#{port}", linger: 0.seconds)
-      wait_until { client.peer_count > 0 && server2.peer_count > 0 }
+      OMQ::TestHelper.wait_disconnected(client)
+      server2 = OMQ::TestHelper.restart_bind_tcp(OMQ::PAIR, port)
+      OMQ::TestHelper.wait_until { client.peer_count > 0 && server2.peer_count > 0 }
 
       client.send("two")
       assert_equal "two", String.new(server2.receive[0])
@@ -122,7 +110,7 @@ describe "Reconnect after TCP server restart" do
       rep = OMQ::REP.bind("tcp://127.0.0.1:0", linger: 0.seconds)
       port = rep.port.not_nil!
       req = OMQ::REQ.connect("tcp://127.0.0.1:#{port}", linger: 0.seconds, reconnect_interval: 20.milliseconds)
-      wait_until { req.peer_count > 0 && rep.peer_count > 0 }
+      OMQ::TestHelper.wait_until { req.peer_count > 0 && rep.peer_count > 0 }
 
       req.send("ping")
       assert_equal "ping", String.new(rep.receive[0])
@@ -130,9 +118,9 @@ describe "Reconnect after TCP server restart" do
       assert_equal "pong", String.new(req.receive[0])
 
       rep.close
-      sleep 50.milliseconds
-      rep2 = OMQ::REP.bind("tcp://127.0.0.1:#{port}", linger: 0.seconds)
-      wait_until { req.peer_count > 0 && rep2.peer_count > 0 }
+      OMQ::TestHelper.wait_disconnected(req)
+      rep2 = OMQ::TestHelper.restart_bind_tcp(OMQ::REP, port)
+      OMQ::TestHelper.wait_until { req.peer_count > 0 && rep2.peer_count > 0 }
 
       req.send("ping2")
       assert_equal "ping2", String.new(rep2.receive[0])
@@ -149,7 +137,7 @@ describe "Reconnect after TCP server restart" do
       rep = OMQ::REP.bind("tcp://127.0.0.1:0", linger: 0.seconds)
       port = rep.port.not_nil!
       dealer = OMQ::DEALER.connect("tcp://127.0.0.1:#{port}", linger: 0.seconds, reconnect_interval: 20.milliseconds)
-      wait_until { dealer.peer_count > 0 && rep.peer_count > 0 }
+      OMQ::TestHelper.wait_until { dealer.peer_count > 0 && rep.peer_count > 0 }
 
       dealer.send(["".to_slice, "request".to_slice])
       assert_equal "request", String.new(rep.receive[0])
@@ -157,9 +145,9 @@ describe "Reconnect after TCP server restart" do
       assert_equal "reply", String.new(dealer.receive.last)
 
       rep.close
-      sleep 50.milliseconds
-      rep2 = OMQ::REP.bind("tcp://127.0.0.1:#{port}", linger: 0.seconds)
-      wait_until { dealer.peer_count > 0 && rep2.peer_count > 0 }
+      OMQ::TestHelper.wait_disconnected(dealer)
+      rep2 = OMQ::TestHelper.restart_bind_tcp(OMQ::REP, port)
+      OMQ::TestHelper.wait_until { dealer.peer_count > 0 && rep2.peer_count > 0 }
 
       dealer.send(["".to_slice, "request2".to_slice])
       assert_equal "request2", String.new(rep2.receive[0])
@@ -182,21 +170,44 @@ describe "Reconnect after TCP server restart" do
         read_timeout: 1.second,
         subscribe: "",
       )
-      wait_until { sub.peer_count > 0 && pub.peer_count > 0 }
+      OMQ::TestHelper.wait_until { sub.peer_count > 0 && pub.peer_count > 0 }
 
       pub.send("first")
       assert_equal "first", String.new(sub.receive[0])
 
       pub.close
-      sleep 50.milliseconds
-      pub2 = OMQ::PUB.bind("tcp://127.0.0.1:#{port}", linger: 0.seconds)
-      wait_until { sub.peer_count > 0 && pub2.peer_count > 0 }
+      OMQ::TestHelper.wait_disconnected(sub)
+      pub2 = OMQ::TestHelper.restart_bind_tcp(OMQ::PUB, port)
+      OMQ::TestHelper.wait_until { sub.peer_count > 0 && pub2.peer_count > 0 }
 
       pub2.send("second")
       assert_equal "second", String.new(sub.receive[0])
 
       sub.close
       pub2.close
+    end
+  end
+
+  it "reconnects PUSH/PULL" do
+    OMQ::TestHelper.with_timeout(5.seconds) do
+      pull = OMQ::PULL.bind("tcp://127.0.0.1:0", linger: 0.seconds)
+      port = pull.port.not_nil!
+      push = OMQ::PUSH.connect("tcp://127.0.0.1:#{port}", linger: 0.seconds, reconnect_interval: 20.milliseconds)
+      OMQ::TestHelper.wait_until { push.peer_count > 0 && pull.peer_count > 0 }
+
+      push.send("first")
+      assert_equal "first", String.new(pull.receive[0])
+
+      pull.close
+      OMQ::TestHelper.wait_disconnected(push)
+      pull2 = OMQ::TestHelper.restart_bind_tcp(OMQ::PULL, port)
+      OMQ::TestHelper.wait_until { push.peer_count > 0 && pull2.peer_count > 0 }
+
+      push.send("second")
+      assert_equal "second", String.new(pull2.receive[0])
+
+      push.close
+      pull2.close
     end
   end
 
@@ -210,7 +221,7 @@ describe "Reconnect after TCP server restart" do
         linger: 0.seconds,
         reconnect_interval: 20.milliseconds,
       )
-      wait_until { push.peer_count > 0 && pull1.peer_count > 0 }
+      OMQ::TestHelper.wait_until { push.peer_count > 0 && pull1.peer_count > 0 }
 
       3.times do |i|
         push.send("old-#{i}")
@@ -218,9 +229,10 @@ describe "Reconnect after TCP server restart" do
       end
 
       pull1.close
-      sleep 50.milliseconds
-      pull2 = OMQ::PULL.bind("tcp://127.0.0.1:#{port}", linger: 0.seconds, read_timeout: 1.second)
-      wait_until { push.peer_count > 0 && pull2.peer_count > 0 }
+      OMQ::TestHelper.wait_disconnected(push)
+      pull2 = OMQ::TestHelper.restart_bind_tcp(OMQ::PULL, port)
+      pull2.read_timeout = 1.second
+      OMQ::TestHelper.wait_until { push.peer_count > 0 && pull2.peer_count > 0 }
 
       5.times { |i| push.send("new-#{i}") }
       received = [] of String
