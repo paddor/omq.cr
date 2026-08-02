@@ -65,6 +65,42 @@ describe "socket constructor options" do
     push.try(&.close)
   end
 
+  it "rejects negative HWM values" do
+    push = OMQ::PUSH.new
+
+    assert_raises(ArgumentError) { push.send_hwm = -1 }
+    assert_raises(ArgumentError) { push.recv_hwm = -1 }
+    assert_raises(ArgumentError) { OMQ::PUSH.new(send_hwm: -1) }
+    assert_raises(ArgumentError) { OMQ::PULL.new(recv_hwm: -1) }
+  ensure
+    push.try(&.close)
+  end
+
+  it "treats explicit nil HWM as unbounded" do
+    push = OMQ::PUSH.new(send_hwm: nil, recv_hwm: nil)
+
+    assert_equal 0, push.send_hwm
+    assert_equal 0, push.recv_hwm
+
+    push.send_hwm = nil
+    push.recv_hwm = nil
+
+    assert_equal 0, push.send_hwm
+    assert_equal 0, push.recv_hwm
+  ensure
+    push.try(&.close)
+  end
+
+  it "set_unbounded sets both HWM values to zero" do
+    push = OMQ::PUSH.new
+
+    assert_same push, push.set_unbounded
+    assert_equal 0, push.send_hwm
+    assert_equal 0, push.recv_hwm
+  ensure
+    push.try(&.close)
+  end
+
   it "applies core options from .new keyword arguments" do
     push = OMQ::PUSH.new(send_hwm: 7, write_timeout: 25.milliseconds, linger: 0.seconds)
 

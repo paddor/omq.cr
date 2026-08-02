@@ -49,17 +49,45 @@ describe "REQ/REP over inproc" do
       request = rep.receive
       assert_equal 3, request.size
       assert_equal "method", String.new(request[0])
-      assert_equal "GET",    String.new(request[1])
-      assert_equal "/foo",   String.new(request[2])
+      assert_equal "GET", String.new(request[1])
+      assert_equal "/foo", String.new(request[2])
 
       rep.send(["200".to_slice, "OK".to_slice])
       reply = req.receive
       assert_equal 2, reply.size
       assert_equal "200", String.new(reply[0])
-      assert_equal "OK",  String.new(reply[1])
+      assert_equal "OK", String.new(reply[1])
 
       req.close
       rep.close
+    end
+  end
+
+  it "preserves multiple routing identity frames through REP" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      router = OMQ::ROUTER.bind("inproc://rr-router-envelope")
+      rep = OMQ::REP.connect("inproc://rr-router-envelope", identity: "rep-peer")
+      until router.peer_count == 1 && rep.peer_count == 1
+        sleep 1.millisecond
+      end
+
+      router.send([
+        "rep-peer".to_slice,
+        "client-a".to_slice,
+        "client-b".to_slice,
+        Bytes.empty,
+        "request".to_slice,
+      ])
+
+      assert_equal "request", String.new(rep.receive[0])
+
+      rep.send("reply")
+      routed = router.receive
+      assert_equal ["rep-peer", "client-a", "client-b", "", "reply"],
+        routed.map { |frame| String.new(frame) }
+
+      rep.close
+      router.close
     end
   end
 end

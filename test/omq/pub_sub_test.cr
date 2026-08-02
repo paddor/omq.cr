@@ -15,7 +15,6 @@ private def collect(sub : OMQ::SUB) : Channel(OMQ::Message)
   ch
 end
 
-
 describe "PUB/SUB over inproc" do
   it "delivers to a subscriber of the matching prefix" do
     OMQ::TestHelper.with_timeout(2.seconds) do
@@ -115,7 +114,6 @@ describe "PUB/SUB over inproc" do
   end
 end
 
-
 describe "PUB/SUB over TCP" do
   it "filters by prefix across TCP" do
     OMQ::TestHelper.with_timeout(3.seconds) do
@@ -156,5 +154,78 @@ describe "PUB/SUB over TCP" do
       sub.close
       pub.close
     end
+  end
+end
+
+describe "PUB/SUB options" do
+  it "PUB defaults to drop_newest on mute" do
+    pub = OMQ::PUB.new
+
+    assert_equal OMQ::Options::MuteStrategy::DropNewest, pub.on_mute
+  ensure
+    pub.try(&.close)
+  end
+
+  it "XPUB defaults to drop_newest on mute" do
+    xpub = OMQ::XPUB.new
+
+    assert_equal OMQ::Options::MuteStrategy::DropNewest, xpub.on_mute
+  ensure
+    xpub.try(&.close)
+  end
+
+  it "SUB and XSUB default to block on mute" do
+    sub = OMQ::SUB.new
+    xsub = OMQ::XSUB.new
+
+    assert_equal OMQ::Options::MuteStrategy::Block, sub.on_mute
+    assert_equal OMQ::Options::MuteStrategy::Block, xsub.on_mute
+  ensure
+    sub.try(&.close)
+    xsub.try(&.close)
+  end
+
+  it "allows explicit PUB on_mute override" do
+    pub = OMQ::PUB.new(on_mute: :block)
+
+    assert_equal OMQ::Options::MuteStrategy::Block, pub.on_mute
+  ensure
+    pub.try(&.close)
+  end
+
+  it "set_unbounded works with PUB" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      pub = OMQ::PUB.new(linger: 0.seconds)
+      pub.set_unbounded
+      pub.bind("inproc://pubsub-unbounded")
+
+      sub = OMQ::SUB.new(linger: 0.seconds)
+      sub.set_unbounded
+      sub.connect("inproc://pubsub-unbounded")
+      sub.subscribe("")
+
+      while pub.peer_count.zero?
+        Fiber.yield
+      end
+
+      pub.send("hello")
+
+      assert_equal "hello", String.new(sub.receive[0])
+
+      pub.close
+      sub.close
+    end
+  end
+end
+
+describe "DropQueue" do
+  it "close is idempotent" do
+    queue = OMQ::DropQueue(String).new(1, OMQ::Options::MuteStrategy::DropNewest)
+
+    queue.close
+    queue.close
+
+    assert queue.closed?
+    assert_nil queue.receive?
   end
 end

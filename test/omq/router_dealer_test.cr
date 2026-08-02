@@ -13,7 +13,7 @@ describe "DEALER/ROUTER over inproc" do
       got = router.receive
       assert_equal 2, got.size
       assert_equal "worker-1", String.new(got[0])
-      assert_equal "hello",    String.new(got[1])
+      assert_equal "hello", String.new(got[1])
 
       # Route a reply back using the identity ROUTER surfaced.
       router.send([got[0], "hi back".to_slice])
@@ -83,8 +83,27 @@ describe "DEALER/ROUTER over inproc" do
       router.close
     end
   end
-end
 
+  it "raises synchronously for unknown identities when router_mandatory is set" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      router = OMQ::ROUTER.bind("inproc://rd-mandatory", router_mandatory: true)
+
+      assert_raises(OMQ::Error) do
+        router.send(["ghost".to_slice, "hello".to_slice])
+      end
+
+      dealer = OMQ::DEALER.connect("inproc://rd-mandatory", identity: "real")
+      dealer.send("ready")
+      router.receive
+
+      router.send(["real".to_slice, "works".to_slice])
+      assert_equal "works", String.new(dealer.receive[0])
+
+      dealer.close
+      router.close
+    end
+  end
+end
 
 describe "DEALER/ROUTER over TCP" do
   it "round-trips using the ZMTP-advertised identity" do
@@ -100,7 +119,7 @@ describe "DEALER/ROUTER over TCP" do
       got = router.receive
       assert_equal 2, got.size
       assert_equal "tcp-worker", String.new(got[0])
-      assert_equal "hello",      String.new(got[1])
+      assert_equal "hello", String.new(got[1])
 
       router.send([got[0], "hi".to_slice])
       reply = dealer.receive

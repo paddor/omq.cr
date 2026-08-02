@@ -1,6 +1,38 @@
 require "../test_helper"
 
 describe "PUB on_mute" do
+  it "defaults to drop_newest for slow subscribers" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      pub = OMQ::PUB.new
+      pub.send_hwm = 8
+      pub.bind("inproc://default-drop-newest")
+
+      sub = OMQ::SUB.connect("inproc://default-drop-newest", subscribe: "")
+
+      while pub.peer_count.zero?
+        Fiber.yield
+      end
+
+      total = 2000
+      total.times { |i| pub.send("msg-#{i}") }
+      Fiber.yield
+
+      sub.read_timeout = 50.milliseconds
+      received = [] of String
+      loop do
+        received << String.new(sub.receive[0])
+      rescue IO::TimeoutError
+        break
+      end
+
+      assert received.size < total, "default drop_newest should discard messages; got #{received.size}"
+      assert_equal "msg-0", received.first
+
+      pub.close
+      sub.close
+    end
+  end
+
   it "drop_newest discards when the per-peer queue is full" do
     OMQ::TestHelper.with_timeout(2.seconds) do
       pub = OMQ::PUB.new
@@ -75,9 +107,11 @@ describe "PUB on_mute" do
     end
   end
 
-  it "block (default) backpressures the publisher" do
+  it "block override backpressures the publisher" do
     OMQ::TestHelper.with_timeout(2.seconds) do
-      pub = OMQ::PUB.bind("inproc://block-mute")
+      pub = OMQ::PUB.new
+      pub.on_mute = :block
+      pub.bind("inproc://block-mute")
       sub = OMQ::SUB.new
       sub.connect("inproc://block-mute")
       sub.subscribe("")

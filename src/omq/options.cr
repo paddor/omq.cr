@@ -1,8 +1,13 @@
 module OMQ
   # Per-socket configuration. Numeric fields hold `Time::Span` for durations
-  # and `Int32` for byte/message counts; `nil` means "disabled" or "OS default".
+  # and `Int32` for byte/message counts. `nil` usually means disabled/OS
+  # default; explicit nil HWM maps to 0, Ruby OMQ's unbounded spelling.
   class Options
     DEFAULT_HWM = 1000
+    # Crystal's Channel is always bounded and preallocates for large
+    # capacities. HWM=0 keeps the public "unbounded" spelling, but maps to
+    # a generous internal cap until OMQ grows a dedicated unbounded queue.
+    UNBOUNDED_HWM_CAPACITY = 65_536
 
     enum MuteStrategy
       Block
@@ -10,8 +15,8 @@ module OMQ
       DropOldest
     end
 
-    property send_hwm : Int32 = DEFAULT_HWM
-    property recv_hwm : Int32 = DEFAULT_HWM
+    @send_hwm : Int32 = DEFAULT_HWM
+    @recv_hwm : Int32 = DEFAULT_HWM
 
     # `nil` linger = wait forever (matching libzmq `-1`); `0.seconds` =
     # immediate close (drop in-flight). Default matches Ruby OMQ: drop.
@@ -45,6 +50,45 @@ module OMQ
       @read_timeout
     end
 
+    def send_hwm : Int32
+      @send_hwm
+    end
+
+    def send_hwm=(val : Int32)
+      validate_hwm(val, "send_hwm")
+      @send_hwm = val
+    end
+
+    def send_hwm=(val : Nil)
+      @send_hwm = 0
+    end
+
+    def send_capacity : Int32
+      self.class.channel_capacity(@send_hwm)
+    end
+
+    def recv_hwm : Int32
+      @recv_hwm
+    end
+
+    def recv_hwm=(val : Int32)
+      validate_hwm(val, "recv_hwm")
+      @recv_hwm = val
+    end
+
+    def recv_hwm=(val : Nil)
+      @recv_hwm = 0
+    end
+
+    def recv_capacity : Int32
+      self.class.channel_capacity(@recv_hwm)
+    end
+
+    def self.channel_capacity(hwm : Int32) : Int32
+      raise ArgumentError.new("hwm must be >= 0 (got #{hwm})") if hwm < 0
+      hwm == 0 ? UNBOUNDED_HWM_CAPACITY : hwm
+    end
+
     def recv_timeout=(val : Time::Span?)
       @read_timeout = val
     end
@@ -73,6 +117,10 @@ module OMQ
     # idiomatic Ruby-OMQ spelling.
     def on_mute=(val : Symbol)
       @on_mute = MuteStrategy.parse(val.to_s)
+    end
+
+    private def validate_hwm(val : Int32, name : String) : Nil
+      raise ArgumentError.new("#{name} must be >= 0 (got #{val})") if val < 0
     end
   end
 end

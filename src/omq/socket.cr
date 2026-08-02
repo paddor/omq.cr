@@ -12,7 +12,7 @@ module OMQ
     class_property default_action : Symbol = :connect
 
     getter options : Options
-    getter? closed : Bool = false
+    @closed = false
 
     @inproc_names = [] of String
     @tcp_listeners = [] of Transport::TCP::Listener
@@ -33,6 +33,7 @@ module OMQ
 
     def initialize(endpoint : String? = nil, **opts)
       @options = Options.new
+      @options.on_mute = default_on_mute
       apply_options(**opts)
       attach(endpoint) if endpoint
     end
@@ -43,6 +44,10 @@ module OMQ
 
     def self.connect(endpoint : String, **opts) : self
       new(">#{endpoint}", **opts)
+    end
+
+    def closed? : Bool
+      @state_mutex.synchronize { @closed }
     end
 
     def attach(endpoint : String) : self
@@ -110,7 +115,7 @@ module OMQ
       scheme, rest = parse_endpoint(endpoint)
       case scheme
       when "inproc"
-        pipe = Transport::Inproc.connect(rest, capacity: @options.recv_hwm, local_identity: @options.identity)
+        pipe = Transport::Inproc.connect(rest, capacity: @options.recv_capacity, local_identity: @options.identity)
         if register_pipe(pipe, endpoint)
           emit_monitor(MonitorEvent::Kind::Connected, endpoint, pipe)
           spawn watch_pipe_close(pipe, endpoint)
@@ -136,7 +141,7 @@ module OMQ
     end
 
     def disconnect(endpoint : String) : self
-      return self if @closed
+      return self if closed?
       parse_endpoint(endpoint)
       disable_connect_endpoint(endpoint)
       close_pipes_at(endpoint)
@@ -144,7 +149,7 @@ module OMQ
     end
 
     def unbind(endpoint : String) : self
-      return self if @closed
+      return self if closed?
       scheme, rest = parse_endpoint(endpoint)
       case scheme
       when "inproc"
@@ -159,6 +164,12 @@ module OMQ
       else
         raise UnsupportedTransport.new(scheme)
       end
+      self
+    end
+
+    def set_unbounded : self
+      @options.send_hwm = nil
+      @options.recv_hwm = nil
       self
     end
 
@@ -204,7 +215,16 @@ module OMQ
     # stalls the socket. The channel is closed when the socket closes, so
     # subscribers can iterate with `while ev = socket.monitor.receive?`.
     def monitor(capacity : Int32 = 128) : Channel(MonitorEvent)
-      @monitor ||= Channel(MonitorEvent).new(capacity)
+      @state_mutex.synchronize do
+        if ch = @monitor
+          ch
+        else
+          ch = Channel(MonitorEvent).new(capacity)
+          ch.close if @closed
+          @monitor = ch
+          ch
+        end
+      end
     end
 
     private def emit_monitor(kind : MonitorEvent::Kind, endpoint : String, pipe : Pipe? = nil, error : Exception? = nil) : Nil
@@ -217,6 +237,7 @@ module OMQ
       else
         # drop on full — subscriber too slow
       end
+    rescue Channel::ClosedError
     end
 
     # Supervises an already-attached pipe: waits until it terminates
@@ -264,8 +285,8 @@ module OMQ
           local_socket_type: socket_type,
           local_identity: @options.identity,
           as_server: false,
-          send_capacity: @options.send_hwm,
-          recv_capacity: @options.recv_hwm,
+          send_capacity: @options.send_capacity,
+          recv_capacity: @options.recv_capacity,
           mechanism: @options.mechanism,
           max_message_size: @options.max_message_size,
           heartbeat_interval: @options.heartbeat_interval,
@@ -281,8 +302,8 @@ module OMQ
           local_socket_type: socket_type,
           local_identity: @options.identity,
           as_server: false,
-          send_capacity: @options.send_hwm,
-          recv_capacity: @options.recv_hwm,
+          send_capacity: @options.send_capacity,
+          recv_capacity: @options.recv_capacity,
           mechanism: @options.mechanism,
           max_message_size: @options.max_message_size,
           heartbeat_interval: @options.heartbeat_interval,
@@ -387,10 +408,14 @@ module OMQ
     # ZMTP socket-type string for the READY command. Concrete types override.
     protected abstract def socket_type : String
 
+    protected def default_on_mute : Options::MuteStrategy
+      Options::MuteStrategy::Block
+    end
+
     protected def apply_options(
       *,
-      send_hwm : Int32? = nil,
-      recv_hwm : Int32? = nil,
+      send_hwm : Int32 | Nil | UnsetOption = UNSET,
+      recv_hwm : Int32 | Nil | UnsetOption = UNSET,
       linger : Time::Span | Nil | UnsetOption = UNSET,
       identity : String | Bytes | Nil = nil,
       read_timeout : Time::Span? = nil,
@@ -409,8 +434,8 @@ module OMQ
       mechanism : ZMTP::Mechanism? = nil,
       router_mandatory : Bool? = nil,
     ) : Nil
-      @options.send_hwm = send_hwm if send_hwm
-      @options.recv_hwm = recv_hwm if recv_hwm
+      @options.send_hwm = send_hwm unless send_hwm.is_a?(UnsetOption)
+      @options.recv_hwm = recv_hwm unless recv_hwm.is_a?(UnsetOption)
       @options.linger = linger unless linger.is_a?(UnsetOption)
       @options.identity = identity if identity
       @options.read_timeout = read_timeout if read_timeout
@@ -611,8 +636,8 @@ module OMQ
             local_socket_type: socket_type,
             local_identity: @options.identity,
             as_server: true,
-            send_capacity: @options.send_hwm,
-            recv_capacity: @options.recv_hwm,
+            send_capacity: @options.send_capacity,
+            recv_capacity: @options.recv_capacity,
             mechanism: @options.mechanism,
             max_message_size: @options.max_message_size,
             heartbeat_interval: @options.heartbeat_interval,
@@ -643,8 +668,8 @@ module OMQ
             local_socket_type: socket_type,
             local_identity: @options.identity,
             as_server: true,
-            send_capacity: @options.send_hwm,
-            recv_capacity: @options.recv_hwm,
+            send_capacity: @options.send_capacity,
+            recv_capacity: @options.recv_capacity,
             mechanism: @options.mechanism,
             max_message_size: @options.max_message_size,
             heartbeat_interval: @options.heartbeat_interval,

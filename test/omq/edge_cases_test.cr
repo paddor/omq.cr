@@ -1,6 +1,39 @@
 require "../test_helper"
 
 describe "Edge cases" do
+  it "delivers an empty string frame" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      pull = OMQ::PULL.bind("inproc://edge-empty-message")
+      push = OMQ::PUSH.connect("inproc://edge-empty-message")
+
+      push.send("")
+      msg = pull.receive
+
+      assert_equal 1, msg.size
+      assert_equal "", String.new(msg[0])
+
+      push.close
+      pull.close
+    end
+  end
+
+  it "delivers binary data with every byte value" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      pull = OMQ::PULL.bind("inproc://edge-binary-message")
+      push = OMQ::PUSH.connect("inproc://edge-binary-message")
+      binary = Bytes.new(256) { |i| i.to_u8 }
+
+      push.send(binary)
+      msg = pull.receive
+
+      assert_equal 1, msg.size
+      assert_equal binary, msg[0]
+
+      push.close
+      pull.close
+    end
+  end
+
   it "routes a DEALER with a 255-byte identity" do
     OMQ::TestHelper.with_timeout(2.seconds) do
       router = OMQ::ROUTER.bind("inproc://edge-bigid")

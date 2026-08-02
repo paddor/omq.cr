@@ -13,7 +13,7 @@ module OMQ
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm, @options.conflate, @options.on_mute)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity, @options.conflate, @options.on_mute)
     end
 
     def send(msg : String) : self
@@ -38,6 +38,10 @@ module OMQ
 
     protected def socket_type : String
       SOCKET_TYPE
+    end
+
+    protected def default_on_mute : Options::MuteStrategy
+      Options::MuteStrategy::DropNewest
     end
 
     protected def attach_pipe(pipe : Pipe) : Nil
@@ -73,7 +77,7 @@ module OMQ
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm, @options.conflate, @options.on_mute)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity, @options.conflate, @options.on_mute)
     end
 
     def send(msg : String) : self
@@ -110,6 +114,10 @@ module OMQ
       SOCKET_TYPE
     end
 
+    protected def default_on_mute : Options::MuteStrategy
+      Options::MuteStrategy::DropNewest
+    end
+
     protected def attach_pipe(pipe : Pipe) : Nil
       @strategy.attach(pipe)
     end
@@ -144,7 +152,7 @@ module OMQ
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity)
     end
 
     def send(msg : String) : self
@@ -237,7 +245,7 @@ module OMQ
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity)
     end
 
     def subscribe(prefix : String = "") : self

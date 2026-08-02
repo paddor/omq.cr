@@ -123,8 +123,8 @@ Classes live under `OMQ::`.
 | Pattern | Send | Receive | When HWM full |
 |---------|------|---------|---------------|
 | **REQ** / **REP** | Work-stealing / route-back | Fair-queue | Block |
-| **PUB** / **SUB** | Fan-out to subscribers | Local subscription filter | Configurable (Block / DropNewest / DropOldest) |
-| **XPUB** / **XSUB** | Fan-out / broadcast | Subscribe events / no filter | Configurable (XPUB) |
+| **PUB** / **SUB** | Fan-out to subscribers | Local subscription filter | DropNewest by default; configurable |
+| **XPUB** / **XSUB** | Fan-out / broadcast | Subscribe events / no filter | DropNewest by default on XPUB; configurable |
 | **PUSH** / **PULL** | Work-stealing to workers | Fair-queue | Block |
 | **DEALER** / **ROUTER** | Work-stealing / identity-route | Fair-queue | Block |
 | **PAIR** | Exclusive 1-to-1 | Exclusive 1-to-1 | Block |
@@ -149,7 +149,7 @@ sub.connect("tcp://server:5555")
 
 | Option | Default | Meaning |
 |---|---|---|
-| `send_hwm` / `recv_hwm` | 1000 | Messages buffered per socket before backpressure/drop kicks in |
+| `send_hwm` / `recv_hwm` | 1000 | Messages buffered per socket before backpressure/drop kicks in; `0` or explicit `nil` selects the unbounded spelling, mapped internally to a large Crystal channel cap |
 | `linger` | `0.seconds` | Close-time drain budget; `nil` = wait forever |
 | `identity` | `""` | Peer identity advertised in the ZMTP READY command |
 | `read_timeout` / `write_timeout` | `nil` | Raise `IO::TimeoutError` after this span |
@@ -158,7 +158,7 @@ sub.connect("tcp://server:5555")
 | `max_message_size` | `nil` | Drop the connection if a frame exceeds this many bytes |
 | `sndbuf` / `rcvbuf` | `nil` | Kernel socket buffer sizes (TCP/IPC only) |
 | `conflate` | `false` | PUB only: keep only the latest message under pressure |
-| `on_mute` | `:block` | PUB only: `:block`, `:drop_newest`, `:drop_oldest` |
+| `on_mute` | `:block`; PUB/XPUB use `:drop_newest` | `:block`, `:drop_newest`, `:drop_oldest` |
 
 ## Benchmarks
 

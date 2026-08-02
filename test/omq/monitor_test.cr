@@ -119,4 +119,12 @@ describe "Socket#monitor" do
 
     s.close
   end
+
+  it "returns a closed monitor channel after socket close" do
+    s = OMQ::PAIR.new
+    s.close
+
+    assert s.monitor.closed?
+    assert_nil s.monitor.receive?
+  end
 end

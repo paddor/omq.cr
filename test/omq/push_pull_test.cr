@@ -104,6 +104,46 @@ describe "PUSH/PULL over inproc" do
       pull.close
     end
   end
+
+  it "set_unbounded works with send-before-receive" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      push = OMQ::PUSH.new(linger: 0.seconds)
+      push.set_unbounded
+      push.bind("inproc://pp-unbounded")
+
+      pull = OMQ::PULL.new(linger: 0.seconds)
+      pull.set_unbounded
+      pull.connect("inproc://pp-unbounded")
+
+      push.send("hello")
+
+      assert_equal "hello", String.new(pull.receive[0])
+
+      push.close
+      pull.close
+    end
+  end
+
+  it "unbounded via HWM nil works with send-before-receive" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      push = OMQ::PUSH.new(linger: 0.seconds)
+      push.send_hwm = nil
+      push.recv_hwm = nil
+      push.bind("inproc://pp-nil-hwm")
+
+      pull = OMQ::PULL.new(linger: 0.seconds)
+      pull.send_hwm = nil
+      pull.recv_hwm = nil
+      pull.connect("inproc://pp-nil-hwm")
+
+      push.send("hello")
+
+      assert_equal "hello", String.new(pull.receive[0])
+
+      push.close
+      pull.close
+    end
+  end
 end
 
 describe "PUSH/PULL over TCP" do
