@@ -2,12 +2,10 @@ require "../test_helper"
 require "../../src/omq/curve"
 
 describe "CURVE encryption" do
-
   def generate_keypair
     sk = Natron::PrivateKey.generate
     {sk.public_key.bytes, sk.bytes}
   end
-
 
   it "REQ/REP round-trips over TCP" do
     server_pub, server_sec = generate_keypair
@@ -38,7 +36,6 @@ describe "CURVE encryption" do
     end
   end
 
-
   it "PUSH/PULL carries multi-frame messages encrypted" do
     server_pub, server_sec = generate_keypair
 
@@ -64,6 +61,36 @@ describe "CURVE encryption" do
     end
   end
 
+  it "keeps CURVE connections alive across heartbeat PING/PONG" do
+    server_pub, server_sec = generate_keypair
+
+    OMQ::TestHelper.with_timeout(3.seconds) do
+      pull = OMQ::PULL.new
+      pull.mechanism = OMQ::ZMTP::Mechanism::Curve.server(public_key: server_pub, secret_key: server_sec)
+      pull.bind("tcp://127.0.0.1:0")
+      port = pull.port.not_nil!
+
+      push = OMQ::PUSH.new
+      push.mechanism = OMQ::ZMTP::Mechanism::Curve.client(server_key: server_pub)
+      push.heartbeat_interval = 40.milliseconds
+      push.heartbeat_timeout = 150.milliseconds
+      push.connect("tcp://127.0.0.1:#{port}")
+
+      OMQ::TestHelper.wait_until { push.peer_count > 0 && pull.peer_count > 0 }
+      push.send("first")
+      assert_equal "first", String.new(pull.receive[0])
+
+      sleep 220.milliseconds
+      assert_equal 1, push.peer_count
+      assert_equal 1, pull.peer_count
+
+      push.send("second")
+      assert_equal "second", String.new(pull.receive[0])
+
+      push.close
+      pull.close
+    end
+  end
 
   it "rejects clients denied by the authenticator" do
     server_pub, server_sec = generate_keypair

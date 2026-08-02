@@ -156,7 +156,7 @@ module OMQ::ZMTP
         _ttl, ctx = Command.parse_ping(body)
         pong = Command.pong(ctx)
         @write_mutex.synchronize do
-          Frame.encode(@io, pong, command: true)
+          write_frame(pong, more: false, command: true)
           flush
         end
       when "PONG"
