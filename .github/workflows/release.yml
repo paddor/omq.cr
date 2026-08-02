@@ -31,6 +31,9 @@ jobs:
 
       - uses: crystal-lang/install-crystal@v1
 
+      - name: checkout natron.cr sibling
+        run: git clone --depth 1 https://github.com/paddor/natron.cr ../natron.cr
+
       - name: verify tag matches shard.yml version
         run: |
           tag_version="${GITHUB_REF_NAME#v}"

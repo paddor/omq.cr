@@ -25,6 +25,9 @@ jobs:
         with:
           crystal: ${{ matrix.crystal }}
 
+      - name: checkout natron.cr sibling
+        run: git clone --depth 1 https://github.com/paddor/natron.cr ../natron.cr
+
       - name: shards install
         run: shards install
 
@@ -46,6 +49,9 @@ jobs:
 
       - name: install ruby omq gem
         run: gem install omq --no-document
+
+      - name: checkout natron.cr sibling
+        run: git clone --depth 1 https://github.com/paddor/natron.cr ../natron.cr
 
       - name: shards install
         run: shards install
