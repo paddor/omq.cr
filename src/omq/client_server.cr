@@ -7,6 +7,9 @@ module OMQ
   # Round-robins outgoing messages, fair-queues replies. No REQ-style
   # strict alternation, no envelope frames. Single-frame messages.
   class CLIENT < Socket
+    include QueueReadable
+    include QueueWritable
+
     @@default_action = :connect
 
     SOCKET_TYPE = "CLIENT"
@@ -68,6 +71,8 @@ module OMQ
   # 4-byte routing ID to each connected CLIENT; #receive surfaces the
   # ID as the first frame, #send_to replies to a specific peer by ID.
   class SERVER < Socket
+    include QueueReadable
+
     @@default_action = :bind
 
     SOCKET_TYPE = "SERVER"

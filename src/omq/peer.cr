@@ -6,6 +6,8 @@ module OMQ
   # Each connected peer gets a 4-byte routing ID; #receive surfaces it
   # as the first frame, #send_to addresses a specific peer.
   class PEER < Socket
+    include QueueReadable
+
     @@default_action = :connect
 
     SOCKET_TYPE = "PEER"

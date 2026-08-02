@@ -138,6 +138,9 @@ sub.read_timeout = 500.milliseconds
 sub.connect("tcp://server:5555")
 ```
 
+Readable sockets also expose queue-style `dequeue`, `pop`, `wait`, and
+`each`; writable sockets expose `enqueue` and `push`.
+
 ### Endpoint prefix convention
 
 - `"@tcp://…"` — bind

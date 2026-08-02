@@ -1,6 +1,8 @@
 module OMQ
   # PUSH: write-only, work-stealing send across PULL peers.
   class PUSH < Socket
+    include QueueWritable
+
     @@default_action = :connect
 
     SOCKET_TYPE = "PUSH"
@@ -66,6 +68,8 @@ module OMQ
 
   # PULL: read-only, fair-queue receive from PUSH peers.
   class PULL < Socket
+    include QueueReadable
+
     @@default_action = :bind
 
     SOCKET_TYPE = "PULL"

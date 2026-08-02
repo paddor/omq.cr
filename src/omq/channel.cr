@@ -9,6 +9,9 @@ module OMQ
   # `Socket-Type` string (`CHANNEL` vs `PAIR`), so we reuse PAIR's
   # single-pipe plumbing and just override the advertised type.
   class CHANNEL < Socket
+    include QueueReadable
+    include QueueWritable
+
     @@default_action = :connect
 
     SOCKET_TYPE = "CHANNEL"

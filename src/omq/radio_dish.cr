@@ -53,6 +53,8 @@ module OMQ
   # DISH (draft, ZeroMQ RFC 48): group-based subscriber. #join selects
   # the groups to receive; messages for other groups are dropped.
   class DISH < Socket
+    include QueueReadable
+
     @@default_action = :connect
 
     SOCKET_TYPE = "DISH"

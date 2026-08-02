@@ -2,6 +2,9 @@ module OMQ
   # PAIR socket: exactly one peer, bidirectional, preserves message
   # boundaries. Works over inproc and TCP.
   class PAIR < Socket
+    include QueueReadable
+    include QueueWritable
+
     @@default_action = :bind
 
     SOCKET_TYPE = "PAIR"

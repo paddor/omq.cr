@@ -2,6 +2,9 @@ module OMQ
   # DEALER: async REQ. Work-stealing send across peers, fair-queue receive.
   # No envelope manipulation.
   class DEALER < Socket
+    include QueueReadable
+    include QueueWritable
+
     @@default_action = :connect
 
     SOCKET_TYPE = "DEALER"
@@ -71,6 +74,9 @@ module OMQ
   # identity as the first frame. On send, the first frame selects the
   # target peer by identity.
   class ROUTER < Socket
+    include QueueReadable
+    include QueueWritable
+
     @@default_action = :bind
 
     SOCKET_TYPE = "ROUTER"

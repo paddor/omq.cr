@@ -2,6 +2,9 @@ module OMQ
   # REQ: strict send/receive alternation, work-stealing across peers.
   # Prepends an empty delimiter frame on the wire.
   class REQ < Socket
+    include QueueReadable
+    include QueueWritable
+
     @@default_action = :connect
 
     SOCKET_TYPE = "REQ"
@@ -70,6 +73,9 @@ module OMQ
   # REP: strict receive/send alternation; reply is routed back to the
   # pipe the request came from.
   class REP < Socket
+    include QueueReadable
+    include QueueWritable
+
     @@default_action = :bind
 
     SOCKET_TYPE = "REP"

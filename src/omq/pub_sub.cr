@@ -1,6 +1,8 @@
 module OMQ
   # PUB: write-only, fans out every message to every connected SUB peer.
   class PUB < Socket
+    include QueueWritable
+
     @@default_action = :bind
 
     SOCKET_TYPE = "PUB"
@@ -65,6 +67,9 @@ module OMQ
   # 0x00 = cancel; ZMTP 3.0 legacy encoding). No server-side filtering in
   # v0.1 — every published message reaches every peer.
   class XPUB < Socket
+    include QueueReadable
+    include QueueWritable
+
     @@default_action = :bind
 
     SOCKET_TYPE = "XPUB"
@@ -140,6 +145,8 @@ module OMQ
   # `#subscribe(prefix)` / `#unsubscribe(prefix)` are convenience helpers
   # that send the ZMTP-3.0-style `\x01 + prefix` / `\x00 + prefix` frames.
   class XSUB < Socket
+    include QueueWritable
+
     @@default_action = :connect
 
     SOCKET_TYPE = "XSUB"
@@ -231,6 +238,8 @@ module OMQ
   # SUB: read-only; only messages whose first frame matches a subscribed
   # prefix are surfaced to the app.
   class SUB < Socket
+    include QueueReadable
+
     @@default_action = :connect
 
     SOCKET_TYPE = "SUB"

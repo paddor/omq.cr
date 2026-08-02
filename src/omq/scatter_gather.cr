@@ -6,6 +6,8 @@ module OMQ
   # SCATTER (draft, ZeroMQ RFC 49): pipeline sender that round-robins to
   # GATHER peers. Single-frame messages only.
   class SCATTER < Socket
+    include QueueWritable
+
     @@default_action = :connect
 
     SOCKET_TYPE = "SCATTER"
@@ -64,6 +66,8 @@ module OMQ
   # GATHER (draft, ZeroMQ RFC 49): pipeline receiver that fair-queues
   # from SCATTER peers. Single-frame messages only.
   class GATHER < Socket
+    include QueueReadable
+
     @@default_action = :bind
 
     SOCKET_TYPE = "GATHER"
