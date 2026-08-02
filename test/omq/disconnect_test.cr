@@ -45,15 +45,38 @@ describe "disconnect / unbind" do
     end
   end
 
-  it "#unbind stops accepting new inproc connections" do
+  it "#unbind detaches old inproc connections; new connects wait for rebind" do
     OMQ::TestHelper.with_timeout(2.seconds) do
       pull = OMQ::PULL.bind("inproc://unbind-inproc")
       pull.unbind("inproc://unbind-inproc")
 
-      assert_raises(OMQ::InvalidEndpoint) do
-        OMQ::PUSH.connect("inproc://unbind-inproc")
+      push = OMQ::PUSH.connect("inproc://unbind-inproc")
+      push.send("queued")
+
+      rebound = OMQ::PULL.bind("inproc://unbind-inproc")
+      assert_equal "queued", String.new(rebound.receive[0])
+
+      push.close
+      rebound.close
+      pull.close
+    end
+  end
+
+  it "#unbind closes accepted TCP pipes and removes the canonical endpoint" do
+    OMQ::TestHelper.with_timeout(3.seconds) do
+      pull = OMQ::PULL.bind("tcp://127.0.0.1:0")
+      port = pull.port.not_nil!
+      push = OMQ::PUSH.connect("tcp://127.0.0.1:#{port}", linger: 0.seconds, reconnect_interval: 1.second)
+
+      until pull.peer_count == 1 && push.peer_count == 1
+        sleep 1.millisecond
       end
 
+      pull.unbind("tcp://127.0.0.1:#{port}")
+      assert_equal 0, pull.peer_count
+      refute_match(/tcp:\/\/127\.0\.0\.1:#{port}/, pull.inspect)
+
+      push.close
       pull.close
     end
   end

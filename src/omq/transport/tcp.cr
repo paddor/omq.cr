@@ -40,7 +40,11 @@ module OMQ
       def bind(endpoint : String) : Listener
         host, port = parse_authority(endpoint.lchop("tcp://"))
         server = TCPServer.new(host, port)
-        Listener.new(server, endpoint)
+        Listener.new(server, "tcp://#{format_host(host)}:#{server.local_address.port}")
+      end
+
+      private def format_host(host : String) : String
+        host.includes?(':') ? "[#{host}]" : host
       end
 
       def connect(endpoint : String) : TCPSocket

@@ -52,6 +52,19 @@ describe "socket constructor options" do
     push.try(&.close)
   end
 
+  it "does not expose mutable identity storage" do
+    identity = Bytes[119, 111, 114, 107, 101, 114]
+    push = OMQ::PUSH.new(identity: identity)
+
+    identity[0] = 'X'.ord.to_u8
+    exposed = push.identity
+    exposed[1] = 'Y'.ord.to_u8
+
+    assert_equal "worker", String.new(push.identity)
+  ensure
+    push.try(&.close)
+  end
+
   it "applies core options from .new keyword arguments" do
     push = OMQ::PUSH.new(send_hwm: 7, write_timeout: 25.milliseconds, linger: 0.seconds)
 
@@ -90,6 +103,15 @@ describe "socket introspection" do
     rep.try(&.close)
   end
 
+  it "shows canonical TCP port after binding to port 0" do
+    pair = OMQ::PAIR.bind("tcp://127.0.0.1:0")
+    port = pair.port.not_nil!
+
+    assert_match(/tcp:\/\/127\.0\.0\.1:#{port}/, pair.inspect)
+  ensure
+    pair.try(&.close)
+  end
+
   it "shows empty bound list before bind/connect" do
     rep = OMQ::REP.new
 
@@ -101,6 +123,14 @@ describe "socket introspection" do
   it "exposes the ØMQ alias" do
     assert_equal OMQ::REQ, ØMQ::REQ
     assert_equal OMQ::PUB, ØMQ::PUB
+  end
+
+  it "raises ClosedError when binding or connecting after close" do
+    push = OMQ::PUSH.new
+    push.close
+
+    assert_raises(OMQ::ClosedError) { push.bind("inproc://closed-bind") }
+    assert_raises(OMQ::ClosedError) { push.connect("inproc://closed-connect") }
   end
 end
 

@@ -74,6 +74,10 @@ module OMQ
       @send_done.receive?
     end
 
+    def await_terminated : Nil
+      @close_signal.receive?
+    end
+
     # Block until the write pump has drained `tx` (or `span` elapses).
     # Returns `true` on drain, `false` on timeout. `nil` = wait forever.
     def await_drained(span : Time::Span?) : Bool

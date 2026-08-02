@@ -3,7 +3,7 @@ require "../test_helper"
 describe "Socket#monitor" do
   it "reports the listen/accept/connected lifecycle for inproc" do
     OMQ::TestHelper.with_timeout(2.seconds) do
-      a      = OMQ::PAIR.new
+      a = OMQ::PAIR.new
       events = a.monitor
       a.bind("inproc://mon-lifecycle")
 
@@ -31,7 +31,7 @@ describe "Socket#monitor" do
     OMQ::TestHelper.with_timeout(2.seconds) do
       a = OMQ::PAIR.bind("inproc://mon-connected")
 
-      b      = OMQ::PAIR.new
+      b = OMQ::PAIR.new
       events = b.monitor
       b.connect("inproc://mon-connected")
 
@@ -42,6 +42,54 @@ describe "Socket#monitor" do
 
       a.close
       b.close
+    end
+  end
+
+  it "emits Disconnected on the inproc bind side when peer closes" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      pull = OMQ::PULL.new
+      events = pull.monitor
+      pull.bind("inproc://mon-inproc-disconnect")
+
+      push = OMQ::PUSH.connect("inproc://mon-inproc-disconnect")
+      events.receive # Listening
+      events.receive # Accepted
+
+      push.close
+      disconnected = events.receive
+
+      assert_equal OMQ::MonitorEvent::Kind::Disconnected, disconnected.kind
+      assert_equal "inproc://mon-inproc-disconnect", disconnected.endpoint
+      assert_equal 0, pull.peer_count
+
+      pull.close
+    end
+  end
+
+  it "emits Disconnected on the TCP bind side when peer closes" do
+    OMQ::TestHelper.with_timeout(3.seconds) do
+      pull = OMQ::PULL.new
+      events = pull.monitor
+      pull.bind("tcp://127.0.0.1:0")
+      port = pull.port.not_nil!
+
+      push = OMQ::PUSH.connect("tcp://127.0.0.1:#{port}", linger: 0.seconds)
+      listening = events.receive
+      accepted = events.receive
+
+      assert_equal OMQ::MonitorEvent::Kind::Listening, listening.kind
+      assert_equal "tcp://127.0.0.1:#{port}", listening.endpoint
+      assert_equal OMQ::MonitorEvent::Kind::Accepted, accepted.kind
+      assert_equal "tcp://127.0.0.1:#{port}", accepted.endpoint
+
+      push.close
+      disconnected = events.receive
+
+      assert_equal OMQ::MonitorEvent::Kind::Disconnected, disconnected.kind
+      assert_equal "tcp://127.0.0.1:#{port}", disconnected.endpoint
+      assert_equal 0, pull.peer_count
+
+      pull.close
     end
   end
 
@@ -61,7 +109,7 @@ describe "Socket#monitor" do
   end
 
   it "drops events when the subscriber channel is full" do
-    s      = OMQ::PAIR.new
+    s = OMQ::PAIR.new
     events = s.monitor(1)
     s.bind("inproc://mon-dropped")
     s.bind("inproc://mon-dropped-2")

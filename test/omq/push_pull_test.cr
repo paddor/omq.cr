@@ -58,11 +58,49 @@ describe "PUSH/PULL over inproc" do
       push.send(["a".to_slice, "bb".to_slice, "ccc".to_slice])
       got = pull.receive
       assert_equal 3, got.size
-      assert_equal "a",   String.new(got[0])
-      assert_equal "bb",  String.new(got[1])
+      assert_equal "a", String.new(got[0])
+      assert_equal "bb", String.new(got[1])
       assert_equal "ccc", String.new(got[2])
 
       push.close
+      pull.close
+    end
+  end
+
+  it "delivers queued messages when connect happens before bind" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      push = OMQ::PUSH.connect("inproc://pp-connect-before-bind", linger: 1.second)
+      push.send("early-1")
+      push.send("early-2")
+
+      pull = OMQ::PULL.bind("inproc://pp-connect-before-bind")
+      push.send("late")
+
+      assert_equal "early-1", String.new(pull.receive[0])
+      assert_equal "early-2", String.new(pull.receive[0])
+      assert_equal "late", String.new(pull.receive[0])
+
+      push.close
+      pull.close
+    end
+  end
+
+  it "does not deadlock binding after many pending connects" do
+    OMQ::TestHelper.with_timeout(3.seconds) do
+      pushes = Array.new(80) do |i|
+        push = OMQ::PUSH.connect("inproc://pp-many-pending", linger: 1.second)
+        push.send("pending-#{i}")
+        push
+      end
+
+      pull = OMQ::PULL.bind("inproc://pp-many-pending")
+      received = [] of String
+      80.times { received << String.new(pull.receive[0]) }
+
+      assert_equal 80, received.size
+      assert_equal 80, received.uniq.size
+
+      pushes.each(&.close)
       pull.close
     end
   end

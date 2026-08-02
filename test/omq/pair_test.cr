@@ -51,9 +51,19 @@ describe "PAIR over inproc" do
     end
   end
 
-  it "raises when connecting to an unbound endpoint" do
-    assert_raises(OMQ::InvalidEndpoint) do
-      OMQ::PAIR.connect("inproc://nowhere")
+  it "delivers messages when connect happens before bind" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      b = OMQ::PAIR.connect("inproc://pair-connect-before-bind")
+      b.send("early")
+
+      a = OMQ::PAIR.bind("inproc://pair-connect-before-bind")
+      assert_equal "early", String.new(a.receive[0])
+
+      a.send("late")
+      assert_equal "late", String.new(b.receive[0])
+
+      b.close
+      a.close
     end
   end
 end
