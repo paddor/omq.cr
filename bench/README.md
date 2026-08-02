@@ -183,6 +183,29 @@ OMQ_BENCH_TRANSPORTS=inproc \
   crystal run --release bench/push_pull/omq.cr
 ```
 
+## 2-process TCP benchmarks
+
+`bench/tcp_process/omq.cr` runs OMQ.rs-style process benchmarks over TCP:
+
+- 1 PUSH process → 2 PULL sockets in one peer process
+- 1 PUB process → 4 and 16 SUB sockets in one peer process
+- 1 REQ process ↔ 1 REP peer process
+
+Throughput sizes default to `16,64,256,1024,4096,16384` bytes. Latency
+sizes default to `16,64,256,1024,4096` bytes. Results append to
+`~/.cache/omq/omq-cr-tcp-process.jsonl`.
+
+```sh
+crystal run --release bench/tcp_process/omq.cr
+
+# Short smoke run
+OMQ_BENCH2_TARGET=0.1 \
+  OMQ_BENCH2_SIZES=16 \
+  OMQ_BENCH2_LATENCY_SIZES=16 \
+  OMQ_BENCH2_LATENCY_ITERS=100 \
+  crystal run --release bench/tcp_process/omq.cr
+```
+
 ## Environment variables
 
 | Variable | Default | Description |
@@ -193,3 +216,12 @@ OMQ_BENCH_TRANSPORTS=inproc \
 | `OMQ_BENCH_TARGET` | `1.0` | Target seconds per timed burst |
 | `OMQ_BENCH_TIMEOUT` | `30` | Per-cell hard timeout in seconds |
 | `OMQ_BENCH_RUN_ID` | ISO timestamp | Shared key so patterns correlate across one run |
+| `OMQ_BENCH2_SIZES` | `16,64,256,1024,4096,16384` | 2-process throughput sizes |
+| `OMQ_BENCH2_LATENCY_SIZES` | `16,64,256,1024,4096` | 2-process latency sizes |
+| `OMQ_BENCH2_PUBSUB_PEERS` | `4,16` | SUB counts for 2-process PUB/SUB |
+| `OMQ_BENCH2_TARGET` | `1.0` | Target seconds per 2-process timed burst |
+| `OMQ_BENCH2_ROUNDS` | `1` | Timed rounds per 2-process cell |
+| `OMQ_BENCH2_MESSAGES` | unset | Fixed throughput message count override |
+| `OMQ_BENCH2_LATENCY_ITERS` | `5000` | REQ/REP measured round trips |
+| `OMQ_BENCH2_LATENCY_WARMUP` | `500` | REQ/REP untimed warmup round trips |
+| `OMQ_BENCH2_OUTPUT` | `~/.cache/omq/omq-cr-tcp-process.jsonl` | 2-process JSONL output |
