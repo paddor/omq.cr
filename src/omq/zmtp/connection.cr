@@ -55,10 +55,16 @@ module OMQ::ZMTP
     # Send one multipart message.
     def send_message(parts : Message) : Nil
       @write_mutex.synchronize do
-        last = parts.size - 1
-        parts.each_with_index do |part, i|
-          write_frame(part, more: i < last, command: false)
-        end
+        write_message(parts)
+        flush
+      end
+    end
+
+    # Send a contiguous batch of data messages. Transport write pumps use
+    # this to amortize kernel writes for tiny queued frames.
+    def send_messages(messages : Array(Message)) : Nil
+      @write_mutex.synchronize do
+        messages.each { |parts| write_message(parts) }
         flush
       end
     end
@@ -82,7 +88,6 @@ module OMQ::ZMTP
       end
     end
 
-
     # Encrypt-aware write: when the mechanism encrypts, `payload` is the
     # inner plaintext (with its real flags) and the wire frame is a
     # COMMAND carrying an encrypted MESSAGE body.
@@ -95,8 +100,19 @@ module OMQ::ZMTP
       end
     end
 
-    # Read one multipart message. Returns nil on clean EOF.
+    private def write_message(parts : Message) : Nil
+      last = parts.size - 1
+      parts.each_with_index do |part, i|
+        write_frame(part, more: i < last, command: false)
+      end
+    end
+
     def receive_message : Message?
+      receive_message { |_name, _body| }
+    end
+
+    # Read one multipart message. Returns nil on clean EOF.
+    def receive_message(&on_command : String, Bytes -> Nil) : Message?
       parts = Message.new
       loop do
         flags_byte = @io.read_byte
@@ -130,7 +146,7 @@ module OMQ::ZMTP
 
         # Commands are handled transparently (PING/PONG); pass others up.
         if command
-          handle_command(payload)
+          handle_command(payload, on_command)
           next
         end
 
@@ -146,25 +162,22 @@ module OMQ::ZMTP
       # closing a closed IO is harmless
     end
 
-    private def handle_command(payload : Bytes) : Nil
+    private def handle_command(payload : Bytes, on_command : String, Bytes -> Nil) : Nil
       name, body = Command.parse(payload)
       case name
       when "PING"
         _ttl, ctx = Command.parse_ping(body)
         pong = Command.pong(ctx)
         @write_mutex.synchronize do
-          Frame.encode(@io, pong, command: true)
+          write_frame(pong, more: false, command: true)
           flush
         end
       when "PONG"
         # ignored; heartbeat logic owns the timing
       when "SUBSCRIBE", "CANCEL"
-        # v0.1 PUB broadcasts everything and filters on the SUB side, so
-        # these are silent no-ops. Keeps interop with libzmq/ruby-omq
-        # SUBs that send real wire-level subscribe commands.
+        on_command.call(name, body)
       when "JOIN", "LEAVE"
-        # v0.1 RADIO broadcasts everything and filters on the DISH side,
-        # so JOIN/LEAVE are silent no-ops (same pattern as SUBSCRIBE).
+        on_command.call(name, body)
       else
         raise ProtocolError.new("unhandled in-band command: #{name}")
       end

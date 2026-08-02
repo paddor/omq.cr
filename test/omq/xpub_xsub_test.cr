@@ -8,10 +8,9 @@ describe "XPUB/XSUB" do
       sub2 = OMQ::XSUB.new
       sub1.connect("inproc://xpx-fanout")
       sub2.connect("inproc://xpx-fanout")
-
-      while xpub.peer_count < 2
-        Fiber.yield
-      end
+      sub1.subscribe("")
+      sub2.subscribe("")
+      2.times { xpub.subscriber_joined.receive }
 
       xpub.send("hello")
 
@@ -24,15 +23,29 @@ describe "XPUB/XSUB" do
     end
   end
 
+  it "does not send data to unsubscribed XSUB peers" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      xpub = OMQ::XPUB.bind("inproc://xpx-filter")
+      sub = OMQ::XSUB.connect("inproc://xpx-filter")
+      sub.read_timeout = 50.milliseconds
+
+      OMQ::TestHelper.wait_until { xpub.peer_count == 1 && sub.peer_count == 1 }
+      xpub.send("dropped")
+
+      assert_raises(IO::TimeoutError) { sub.receive }
+
+      xpub.close
+      sub.close
+    end
+  end
+
   it "surfaces XSUB subscribe events on XPUB rx with the 0x01 marker" do
     OMQ::TestHelper.with_timeout(2.seconds) do
       xpub = OMQ::XPUB.bind("inproc://xpx-subs")
       xsub = OMQ::XSUB.new
       xsub.connect("inproc://xpx-subs")
 
-      while xpub.peer_count.zero?
-        Fiber.yield
-      end
+      OMQ::TestHelper.wait_until { xpub.peer_count == 1 && xsub.peer_count == 1 }
 
       xsub.subscribe("topic")
 
@@ -51,6 +64,25 @@ describe "XPUB/XSUB" do
     end
   end
 
+  it "surfaces command-form SUB subscribe events on XPUB rx" do
+    OMQ::TestHelper.with_timeout(3.seconds) do
+      xpub = OMQ::XPUB.bind("tcp://127.0.0.1:0")
+      port = xpub.port.not_nil!
+      sub = OMQ::SUB.connect("tcp://127.0.0.1:#{port}", subscribe: "topic")
+
+      event = xpub.receive
+      assert_equal 1, event.size
+      assert_equal 0x01_u8, event[0][0]
+      assert_equal "topic", String.new(event[0][1..])
+
+      pipe = xpub.subscriber_joined.receive
+      refute pipe.closed?
+
+      xpub.close
+      sub.close
+    end
+  end
+
   it "XSUB broadcasts outbound sends to every connected XPUB" do
     OMQ::TestHelper.with_timeout(2.seconds) do
       pub1 = OMQ::XPUB.bind("inproc://xpx-bcast-1")
@@ -59,9 +91,7 @@ describe "XPUB/XSUB" do
       xsub.connect("inproc://xpx-bcast-1")
       xsub.connect("inproc://xpx-bcast-2")
 
-      while pub1.peer_count.zero? || pub2.peer_count.zero?
-        Fiber.yield
-      end
+      OMQ::TestHelper.wait_until { pub1.peer_count == 1 && pub2.peer_count == 1 && xsub.peer_count == 2 }
 
       xsub.subscribe("a")
 

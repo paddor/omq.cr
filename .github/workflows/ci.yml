@@ -25,6 +25,14 @@ jobs:
         with:
           crystal: ${{ matrix.crystal }}
 
+      - name: install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsodium-dev
+
+      - name: checkout natron.cr sibling
+        run: git clone --depth 1 https://github.com/paddor/natron.cr ../natron.cr
+
       - name: shards install
         run: shards install
 
@@ -44,8 +52,16 @@ jobs:
         with:
           ruby-version: "3.3"
 
+      - name: install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsodium-dev
+
       - name: install ruby omq gem
         run: gem install omq --no-document
+
+      - name: checkout natron.cr sibling
+        run: git clone --depth 1 https://github.com/paddor/natron.cr ../natron.cr
 
       - name: shards install
         run: shards install

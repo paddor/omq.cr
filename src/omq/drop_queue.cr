@@ -1,5 +1,4 @@
 module OMQ
-
   # Bounded queue with non-blocking push that honors a drop policy when
   # full. Used by PUB/XPUB/RADIO fan-out per-peer queues so a slow
   # subscriber can't back-pressure the publisher.
@@ -13,12 +12,11 @@ module OMQ
   # used purely as a signal — receivers park on it when the queue is
   # empty and are woken by the next successful push or by `close`.
   class DropQueue(T)
-    getter? closed : Bool = false
-
+    @closed = false
 
     def initialize(@capacity : Int32, @strategy : Options::MuteStrategy)
-      @items  = Deque(T).new
-      @mutex  = Mutex.new
+      @items = Deque(T).new
+      @mutex = Mutex.new
       @signal = Channel(Nil).new(1)
     end
 
@@ -60,13 +58,22 @@ module OMQ
         return nil if was_closed
 
         @signal.receive?
-        return nil if @closed && @mutex.synchronize { @items.empty? }
+        return nil if @mutex.synchronize { @closed && @items.empty? }
       end
     end
 
     def close : Nil
-      @mutex.synchronize { @closed = true }
-      @signal.close
+      first_close = @mutex.synchronize do
+        already_closed = @closed
+        @closed = true
+        !already_closed
+      end
+      @signal.close if first_close
+    rescue Channel::ClosedError
+    end
+
+    def closed? : Bool
+      @mutex.synchronize { @closed }
     end
 
     private def wake : Nil
@@ -75,6 +82,8 @@ module OMQ
       else
         # Signal already pending; receivers will pick up on next drain.
       end
+    rescue Channel::ClosedError
+      # Queue closed after enqueue but before signal delivery.
     end
   end
 end

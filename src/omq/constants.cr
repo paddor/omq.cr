@@ -3,6 +3,9 @@ module OMQ
 
   alias Message = Array(Bytes)
 
+  RECV_FAIRNESS_MESSAGES = 16
+  RECV_FAIRNESS_BYTES    = 1024 * 1024
+
   module ZMTP
     SIGNATURE = Bytes[0xFF, 0, 0, 0, 0, 0, 0, 0, 0, 0x7F]
 

@@ -4,10 +4,8 @@
 #
 # Usage: pub_sub_publisher.rb <topic> <n>
 #
-# Binds, prints ENDPOINT=<uri>, waits for a subscriber to attach (peer_count >
-# 0), then publishes <n> messages of the form "<topic> <i>" with a small
-# gap so the subscriber has time to finish its local subscribe before the
-# first frame hits the wire. Exits on EOF.
+# Binds, prints ENDPOINT=<uri>, waits for SUBSCRIBE, then publishes <n>
+# messages of the form "<topic> <i>". Exits on EOF.
 
 require "omq"
 require "async"
@@ -27,13 +25,7 @@ Async do |task|
     task.stop
   end
 
-  # Wait for at least one subscriber before publishing — raw PUB drops
-  # messages to absent peers and we don't want to race the handshake.
-  pub.peer_connected
-  # A further tick lets the SUB's local subscribe() apply before we
-  # start publishing — without this the very first frame is often
-  # filtered out by the subscriber.
-  sleep 0.1
+  pub.subscriber_joined.wait
 
   count.times do |i|
     pub << "#{topic} #{i}"

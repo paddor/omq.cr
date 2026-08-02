@@ -27,8 +27,7 @@ Async do |task|
     task.stop
   end
 
-  radio.peer_connected
-  sleep 0.1
+  radio.subscriber_joined.wait
 
   count.times do |i|
     radio.publish("ignore", "dropped-#{i}")

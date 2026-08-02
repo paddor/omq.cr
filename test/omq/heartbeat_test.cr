@@ -7,6 +7,7 @@ describe "Heartbeat" do
       port = pull.port.not_nil!
 
       push = OMQ::PUSH.new
+      events = push.monitor
       push.heartbeat_interval = 50.milliseconds
       push.connect("tcp://127.0.0.1:#{port}")
 
@@ -14,13 +15,11 @@ describe "Heartbeat" do
       # background. If they were broken, the data path would be fine, so
       # we need to wait out an interval and check that the peer is still
       # here (nothing has torn the pipe down).
-      while push.peer_count.zero? || pull.peer_count.zero?
-        Fiber.yield
-      end
+      OMQ::TestHelper.wait_until { push.peer_count > 0 && pull.peer_count > 0 }
       push.send("x")
       assert_equal "x", String.new(pull.receive[0])
 
-      sleep 300.milliseconds
+      OMQ::TestHelper.refute_monitor_event(events, OMQ::MonitorEvent::Kind::Disconnected, 300.milliseconds)
       assert_equal 1, push.peer_count
       assert_equal 1, pull.peer_count
 
@@ -67,17 +66,8 @@ describe "Heartbeat" do
       push.reconnect_interval = 1.hour
       push.connect("tcp://127.0.0.1:#{port}")
 
-      while push.peer_count.zero?
-        Fiber.yield
-      end
-
-      started = Time.instant
-      while push.peer_count > 0
-        Fiber.yield
-        break if Time.instant - started > 1.second
-      end
-      assert_equal 0, push.peer_count,
-        "expected heartbeat timeout to tear down pipe within 1s"
+      OMQ::TestHelper.wait_until { push.peer_count > 0 }
+      OMQ::TestHelper.wait_until(1.second) { push.peer_count.zero? }
 
       push.close
       tcp_server.close

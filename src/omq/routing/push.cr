@@ -12,23 +12,22 @@ module OMQ
 
       def initialize(capacity : Int32)
         @tx = Channel(Message).new(capacity)
-        @closed = false
+        @closed = Atomic(Bool).new(false)
         @pumps = WaitGroup.new
       end
 
       def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
-        return if @closed
+        return if closed?
         @tx = Channel(Message).new(send_hwm)
       end
 
       def attach(pipe : Pipe) : Nil
-        return if @closed
+        return if closed?
         @pumps.spawn { pump(pipe) }
       end
 
       def close_send : Nil
-        return if @closed
-        @closed = true
+        return unless close_once
         @tx.close
       end
 
@@ -57,11 +56,11 @@ module OMQ
       end
 
       private def pump(pipe : Pipe) : Nil
-        while msg = @tx.receive?
+        while msg = receive_send(@tx, pipe)
           begin
             pipe.tx.send(msg)
           rescue Channel::ClosedError
-            # peer gone; in-flight message drops (matches libzmq)
+            restore_send(@tx, msg)
             break
           end
         end

@@ -4,53 +4,47 @@ require "./routing/dish"
 
 module OMQ
   # RADIO (draft, ZeroMQ RFC 48): group-based publisher. Every message
-  # is a 2-frame `[group, body]`. v0.1 broadcasts to every peer and
-  # leaves group-filtering to DISH.
+  # is a 2-frame `[group, body]`. Broadcasts to every peer and leaves
+  # group filtering to DISH.
   class RADIO < Socket
     @@default_action = :bind
 
-
     SOCKET_TYPE = "RADIO"
-
 
     @strategy : Routing::Radio
 
-
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @strategy = Routing::Radio.new(Options::DEFAULT_HWM)
-      super(endpoint)
+      super(endpoint, **opts)
     end
-
 
     def publish(group : String, body : String) : self
       send_frames([group.to_slice, body.to_slice])
     end
 
-
     def publish(group : String, body : Bytes) : self
       send_frames([group.to_slice, body])
     end
 
+    def subscriber_joined : ::Channel(Pipe)
+      @strategy.subscriber_joined
+    end
 
     protected def socket_type : String
       SOCKET_TYPE
     end
 
-
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity)
     end
-
 
     protected def attach_pipe(pipe : Pipe) : Nil
       @strategy.attach(pipe)
     end
 
-
     protected def on_close : Nil
       @strategy.close
     end
-
 
     private def send_frames(frames : Message) : self
       channel_send(@strategy.tx, frames)
@@ -60,36 +54,31 @@ module OMQ
     end
   end
 
-
   # DISH (draft, ZeroMQ RFC 48): group-based subscriber. #join selects
   # the groups to receive; messages for other groups are dropped.
   class DISH < Socket
-    @@default_action = :connect
+    include QueueReadable
 
+    @@default_action = :connect
 
     SOCKET_TYPE = "DISH"
 
-
     @strategy : Routing::Dish
 
-
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @strategy = Routing::Dish.new(Options::DEFAULT_HWM)
-      super(endpoint)
+      super(endpoint, **opts)
     end
-
 
     def join(group : String) : self
       @strategy.join(group)
       self
     end
 
-
     def leave(group : String) : self
       @strategy.leave(group)
       self
     end
-
 
     def receive : Message
       channel_receive(@strategy.rx)
@@ -97,26 +86,21 @@ module OMQ
       raise ClosedError.new("socket closed while receiving")
     end
 
-
     def receive? : Message?
       @strategy.rx.receive?
     end
-
 
     protected def socket_type : String
       SOCKET_TYPE
     end
 
-
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity)
     end
-
 
     protected def attach_pipe(pipe : Pipe) : Nil
       @strategy.attach(pipe)
     end
-
 
     protected def on_close : Nil
       @strategy.close

@@ -2,19 +2,22 @@ module OMQ
   # REQ: strict send/receive alternation, work-stealing across peers.
   # Prepends an empty delimiter frame on the wire.
   class REQ < Socket
+    include QueueReadable
+    include QueueWritable
+
     @@default_action = :connect
 
     SOCKET_TYPE = "REQ"
 
     @strategy : Routing::Req
 
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @strategy = Routing::Req.new(Options::DEFAULT_HWM, Options::DEFAULT_HWM)
-      super(endpoint)
+      super(endpoint, **opts)
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity)
     end
 
     def send(msg : String) : self
@@ -67,23 +70,25 @@ module OMQ
     end
   end
 
-
   # REP: strict receive/send alternation; reply is routed back to the
   # pipe the request came from.
   class REP < Socket
+    include QueueReadable
+    include QueueWritable
+
     @@default_action = :bind
 
     SOCKET_TYPE = "REP"
 
     @strategy : Routing::Rep
 
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @strategy = Routing::Rep.new(Options::DEFAULT_HWM, Options::DEFAULT_HWM)
-      super(endpoint)
+      super(endpoint, **opts)
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity)
     end
 
     def send(msg : String) : self

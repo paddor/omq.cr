@@ -1,23 +1,21 @@
 module OMQ
-
   # PUB: write-only, fans out every message to every connected SUB peer.
   class PUB < Socket
-    @@default_action = :bind
+    include QueueWritable
 
+    @@default_action = :bind
 
     SOCKET_TYPE = "PUB"
 
-
     @strategy : Routing::Pub
 
-
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @strategy = Routing::Pub.new(Options::DEFAULT_HWM)
-      super(endpoint)
+      super(endpoint, **opts)
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm, @options.conflate, @options.on_mute)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity, @options.conflate, @options.on_mute)
     end
 
     def send(msg : String) : self
@@ -40,8 +38,16 @@ module OMQ
       send(msg)
     end
 
+    def subscriber_joined : Channel(Pipe)
+      @strategy.subscriber_joined
+    end
+
     protected def socket_type : String
       SOCKET_TYPE
+    end
+
+    protected def default_on_mute : Options::MuteStrategy
+      Options::MuteStrategy::DropNewest
     end
 
     protected def attach_pipe(pipe : Pipe) : Nil
@@ -60,28 +66,26 @@ module OMQ
     end
   end
 
-
-  # XPUB: like PUB, but subscribe/cancel messages sent by XSUB peers
-  # surface on `#receive` as raw data frames (first byte 0x01 = subscribe,
-  # 0x00 = cancel; ZMTP 3.0 legacy encoding). No server-side filtering in
-  # v0.1 — every published message reaches every peer.
+  # XPUB: like PUB, but subscribe/cancel messages sent by peers surface
+  # on `#receive` as raw data frames (first byte 0x01 = subscribe,
+  # 0x00 = cancel). Published messages go to matching peers.
   class XPUB < Socket
-    @@default_action = :bind
+    include QueueReadable
+    include QueueWritable
 
+    @@default_action = :bind
 
     SOCKET_TYPE = "XPUB"
 
-
     @strategy : Routing::XPub
 
-
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @strategy = Routing::XPub.new(Options::DEFAULT_HWM)
-      super(endpoint)
+      super(endpoint, **opts)
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm, @options.conflate, @options.on_mute)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity, @options.conflate, @options.on_mute)
     end
 
     def send(msg : String) : self
@@ -102,6 +106,10 @@ module OMQ
 
     def <<(msg) : self
       send(msg)
+    end
+
+    def subscriber_joined : Channel(Pipe)
+      @strategy.subscriber_joined
     end
 
     def receive : Message
@@ -118,6 +126,10 @@ module OMQ
       SOCKET_TYPE
     end
 
+    protected def default_on_mute : Options::MuteStrategy
+      Options::MuteStrategy::DropNewest
+    end
+
     protected def attach_pipe(pipe : Pipe) : Nil
       @strategy.attach(pipe)
     end
@@ -134,29 +146,27 @@ module OMQ
     end
   end
 
-
   # XSUB: read/write. `#send` broadcasts to every connected peer (so an
   # app can issue subscribe/cancel to all upstream XPUBs at once).
   # `#receive` returns every incoming message — no local prefix filter.
   # `#subscribe(prefix)` / `#unsubscribe(prefix)` are convenience helpers
   # that send the ZMTP-3.0-style `\x01 + prefix` / `\x00 + prefix` frames.
   class XSUB < Socket
-    @@default_action = :connect
+    include QueueWritable
 
+    @@default_action = :connect
 
     SOCKET_TYPE = "XSUB"
 
-
     @strategy : Routing::XSub
 
-
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @strategy = Routing::XSub.new(Options::DEFAULT_HWM)
-      super(endpoint)
+      super(endpoint, **opts)
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity)
     end
 
     def send(msg : String) : self
@@ -232,26 +242,26 @@ module OMQ
     end
   end
 
-
   # SUB: read-only; only messages whose first frame matches a subscribed
   # prefix are surfaced to the app.
   class SUB < Socket
-    @@default_action = :connect
+    include QueueReadable
 
+    @@default_action = :connect
 
     SOCKET_TYPE = "SUB"
 
-
     @strategy : Routing::Sub
 
-
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, *, subscribe : String | Bytes | Nil = nil, **opts)
       @strategy = Routing::Sub.new(Options::DEFAULT_HWM)
-      super(endpoint)
+      super(nil, **opts)
+      self.subscribe(subscribe) if subscribe
+      attach(endpoint) if endpoint
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity)
     end
 
     def subscribe(prefix : String = "") : self

@@ -5,6 +5,8 @@ module OMQ
   # etc. for concrete shapes.
   module Routing
     abstract class Strategy
+      @closed : Atomic(Bool)?
+
       # Attach a newly-opened pipe (accepted or connected).
       abstract def attach(pipe : Pipe) : Nil
 
@@ -31,6 +33,30 @@ module OMQ
       # timeout.
       def await_drained(span : Time::Span?) : Bool
         true
+      end
+
+      protected def receive_send(channel : Channel(Message), pipe : Pipe) : Message?
+        return nil if pipe.closed? || pipe.close_signal.closed?
+
+        select
+        when msg = channel.receive?
+          msg
+        when pipe.close_signal.receive?
+          nil
+        end
+      end
+
+      protected def restore_send(channel : Channel(Message), msg : Message) : Nil
+        channel.send(msg)
+      rescue Channel::ClosedError
+      end
+
+      protected def closed? : Bool
+        @closed.not_nil!.get
+      end
+
+      protected def close_once : Bool
+        @closed.not_nil!.compare_and_set(false, true)[1]
       end
     end
   end

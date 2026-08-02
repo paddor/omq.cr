@@ -22,26 +22,43 @@ module OMQ
     # Wire-level subscribe encoding and PING eligibility key off this.
     property peer_zmtp_minor : UInt8 = ZMTP::MINOR_VERSION
 
+    getter close_signal : Channel(Nil)
 
-    # Out-of-band channel for pre-encoded ZMTP commands (SUBSCRIBE/CANCEL).
-    # Only populated for TCP/IPC pipes — inproc doesn't speak ZMTP on the
-    # wire, so `#send_command` is a no-op there (pure-Crystal PUB/SUB
-    # filters locally and doesn't need wire-level subscriptions).
+    # Out-of-band channel for pre-encoded ZMTP commands (SUBSCRIBE/CANCEL)
+    # on TCP/IPC pipes. Inproc pipes parse those bytes into command events
+    # and deliver them to the peer directly.
     getter commands_tx : Channel(Bytes)? = nil
+    getter commands_rx : Channel(ZMTP::CommandEvent)? = nil
 
-
-    def initialize(@tx : Channel(Message), @rx : Channel(Message), @send_done : Channel(Nil) = Pipe.pre_closed_channel, @commands_tx : Channel(Bytes)? = nil)
+    def initialize(
+      @tx : Channel(Message),
+      @rx : Channel(Message),
+      @send_done : Channel(Nil) = Pipe.pre_closed_channel,
+      @commands_tx : Channel(Bytes)? = nil,
+      @commands_rx : Channel(ZMTP::CommandEvent)? = nil,
+      @commands_out : Channel(ZMTP::CommandEvent)? = nil,
+      @close_signal : Channel(Nil) = Channel(Nil).new,
+    )
     end
 
-    # Best-effort send of a ZMTP command payload upstream. No-op if this
-    # pipe has no command channel or the channel is closed.
+    # Best-effort send of a ZMTP command payload upstream.
     def send_command(payload : Bytes) : Nil
-      ch = @commands_tx
-      return unless ch
-      begin
+      if ch = @commands_tx
         ch.send(payload)
+      elsif ch = @commands_out
+        name, body = ZMTP::Command.parse(payload)
+        ch.send(ZMTP::CommandEvent.new(name, body))
+      end
+    rescue Channel::ClosedError | ProtocolError
+      # pipe went away or the command payload was invalid
+    end
+
+    def close_commands : Nil
+      begin
+        @commands_tx.try { |ch| ch.close unless ch.closed? }
+        @commands_rx.try { |ch| ch.close unless ch.closed? }
+        @commands_out.try { |ch| ch.close unless ch.closed? }
       rescue Channel::ClosedError
-        # pipe went away — drop silently
       end
     end
 
@@ -55,7 +72,13 @@ module OMQ
     def self.pair(capacity : Int32) : {Pipe, Pipe}
       a_to_b = Channel(Message).new(capacity)
       b_to_a = Channel(Message).new(capacity)
-      {Pipe.new(tx: a_to_b, rx: b_to_a), Pipe.new(tx: b_to_a, rx: a_to_b)}
+      a_cmds = Channel(ZMTP::CommandEvent).new(capacity)
+      b_cmds = Channel(ZMTP::CommandEvent).new(capacity)
+      close_signal = Channel(Nil).new
+      {
+        Pipe.new(tx: a_to_b, rx: b_to_a, commands_rx: b_cmds, commands_out: a_cmds, close_signal: close_signal),
+        Pipe.new(tx: b_to_a, rx: a_to_b, commands_rx: a_cmds, commands_out: b_cmds, close_signal: close_signal),
+      }
     end
 
     # Stop accepting new outgoing messages; let the write pump flush
@@ -71,6 +94,10 @@ module OMQ
     # pipes where reconnect makes sense (TCP, IPC).
     def await_closed : Nil
       @send_done.receive?
+    end
+
+    def await_terminated : Nil
+      @close_signal.receive?
     end
 
     # Block until the write pump has drained `tx` (or `span` elapses).
@@ -91,8 +118,10 @@ module OMQ
     end
 
     def close : Nil
-      @tx.close
-      @rx.close
+      @close_signal.close unless @close_signal.closed?
+      @tx.close unless @tx.closed?
+      @rx.close unless @rx.closed?
+      close_commands
     end
 
     def closed? : Bool

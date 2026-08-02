@@ -1,15 +1,17 @@
 module OMQ
   # PUSH: write-only, work-stealing send across PULL peers.
   class PUSH < Socket
+    include QueueWritable
+
     @@default_action = :connect
 
     SOCKET_TYPE = "PUSH"
 
     @strategy : Routing::Push
 
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @strategy = Routing::Push.new(Options::DEFAULT_HWM)
-      super(endpoint)
+      super(endpoint, **opts)
     end
 
     def send(msg : String) : self
@@ -37,7 +39,7 @@ module OMQ
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity)
     end
 
     protected def attach_pipe(pipe : Pipe) : Nil
@@ -64,22 +66,23 @@ module OMQ
     end
   end
 
-
   # PULL: read-only, fair-queue receive from PUSH peers.
   class PULL < Socket
+    include QueueReadable
+
     @@default_action = :bind
 
     SOCKET_TYPE = "PULL"
 
     @strategy : Routing::Pull
 
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @strategy = Routing::Pull.new(Options::DEFAULT_HWM)
-      super(endpoint)
+      super(endpoint, **opts)
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity)
     end
 
     def receive : Message

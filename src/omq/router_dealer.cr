@@ -2,19 +2,22 @@ module OMQ
   # DEALER: async REQ. Work-stealing send across peers, fair-queue receive.
   # No envelope manipulation.
   class DEALER < Socket
+    include QueueReadable
+    include QueueWritable
+
     @@default_action = :connect
 
     SOCKET_TYPE = "DEALER"
 
     @strategy : Routing::Dealer
 
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @strategy = Routing::Dealer.new(Options::DEFAULT_HWM, Options::DEFAULT_HWM)
-      super(endpoint)
+      super(endpoint, **opts)
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity)
     end
 
     def send(msg : String) : self
@@ -67,24 +70,26 @@ module OMQ
     end
   end
 
-
   # ROUTER: async REP. On receive, prepends the originating peer's
   # identity as the first frame. On send, the first frame selects the
   # target peer by identity.
   class ROUTER < Socket
+    include QueueReadable
+    include QueueWritable
+
     @@default_action = :bind
 
     SOCKET_TYPE = "ROUTER"
 
     @strategy : Routing::Router
 
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @strategy = Routing::Router.new(Options::DEFAULT_HWM, Options::DEFAULT_HWM)
-      super(endpoint)
+      super(endpoint, **opts)
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_hwm, @options.recv_hwm)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity)
     end
 
     def send(msg : Array(Bytes)) : self
@@ -93,6 +98,26 @@ module OMQ
 
     def send(msg : Array(String)) : self
       send_frames(msg.map(&.to_slice))
+    end
+
+    def send_to(identity : String, msg) : self
+      send_to(identity.to_slice, msg)
+    end
+
+    def send_to(identity : Bytes, msg : String) : self
+      send_to_frames(identity, [msg.to_slice])
+    end
+
+    def send_to(identity : Bytes, msg : Bytes) : self
+      send_to_frames(identity, [msg])
+    end
+
+    def send_to(identity : Bytes, msg : Array(String)) : self
+      send_to_frames(identity, msg.map(&.to_slice))
+    end
+
+    def send_to(identity : Bytes, msg : Array(Bytes)) : self
+      send_to_frames(identity, msg)
     end
 
     def <<(msg) : self
@@ -130,6 +155,14 @@ module OMQ
       self
     rescue Channel::ClosedError
       raise ClosedError.new("socket closed while sending")
+    end
+
+    private def send_to_frames(identity : Bytes, body : Message) : self
+      frames = Message.new(body.size + 2)
+      frames << identity.dup
+      frames << Bytes.empty
+      body.each { |frame| frames << frame }
+      send_frames(frames)
     end
   end
 end

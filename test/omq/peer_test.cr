@@ -8,16 +8,12 @@ describe "PEER over inproc" do
       b = OMQ::PEER.connect("inproc://peer-basic")
 
       # a assigned b a routing ID on attach; grab it and send first.
-      # Give the accept fiber a moment to register the inbound pipe.
+      OMQ::TestHelper.wait_until { !a.peer_routing_ids.empty? }
       ids = a.peer_routing_ids
-      while ids.empty?
-        Fiber.yield
-        ids = a.peer_routing_ids
-      end
       b_id_on_a = ids[0]
 
       a.send_to(b_id_on_a, "ping")
-      msg       = b.receive
+      msg = b.receive
       a_id_on_b = msg[0]
       assert_equal "ping", String.new(msg[1])
 

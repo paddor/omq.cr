@@ -10,8 +10,10 @@ require "./omq/options"
 require "./omq/monitor_event"
 require "./omq/drop_queue"
 require "./omq/socket"
+require "./omq/queue_interface"
 require "./omq/pipe"
 require "./omq/transport/heartbeat"
+require "./omq/transport/batching"
 require "./omq/transport/inproc"
 require "./omq/transport/tcp"
 require "./omq/transport/ipc"
@@ -36,3 +38,5 @@ require "./omq/router_dealer"
 # and the Ruby `omq` gem. No libzmq, no FFI.
 module OMQ
 end
+
+alias ØMQ = OMQ
