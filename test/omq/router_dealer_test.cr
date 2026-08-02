@@ -84,6 +84,24 @@ describe "DEALER/ROUTER over inproc" do
     end
   end
 
+  it "send_to routes through an empty delimiter frame" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      router = OMQ::ROUTER.bind("inproc://rd-send-to")
+      dealer = OMQ::DEALER.connect("inproc://rd-send-to", identity: "known")
+
+      dealer.send("ready")
+      router.receive
+
+      router.send_to("known", "hello back")
+      reply = dealer.receive
+
+      assert_equal ["", "hello back"], reply.map { |frame| String.new(frame) }
+
+      dealer.close
+      router.close
+    end
+  end
+
   it "raises synchronously for unknown identities when router_mandatory is set" do
     OMQ::TestHelper.with_timeout(2.seconds) do
       router = OMQ::ROUTER.bind("inproc://rd-mandatory", router_mandatory: true)
@@ -98,6 +116,24 @@ describe "DEALER/ROUTER over inproc" do
 
       router.send(["real".to_slice, "works".to_slice])
       assert_equal "works", String.new(dealer.receive[0])
+
+      dealer.close
+      router.close
+    end
+  end
+
+  it "send_to raises synchronously for unknown identities when router_mandatory is set" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      router = OMQ::ROUTER.bind("inproc://rd-send-to-mandatory", router_mandatory: true)
+
+      assert_raises(OMQ::Error) { router.send_to("ghost", "hello") }
+
+      dealer = OMQ::DEALER.connect("inproc://rd-send-to-mandatory", identity: "real")
+      dealer.send("ready")
+      router.receive
+
+      router.send_to("real", "works")
+      assert_equal ["", "works"], dealer.receive.map { |frame| String.new(frame) }
 
       dealer.close
       router.close

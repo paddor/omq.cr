@@ -100,6 +100,26 @@ module OMQ
       send_frames(msg.map(&.to_slice))
     end
 
+    def send_to(identity : String, msg) : self
+      send_to(identity.to_slice, msg)
+    end
+
+    def send_to(identity : Bytes, msg : String) : self
+      send_to_frames(identity, [msg.to_slice])
+    end
+
+    def send_to(identity : Bytes, msg : Bytes) : self
+      send_to_frames(identity, [msg])
+    end
+
+    def send_to(identity : Bytes, msg : Array(String)) : self
+      send_to_frames(identity, msg.map(&.to_slice))
+    end
+
+    def send_to(identity : Bytes, msg : Array(Bytes)) : self
+      send_to_frames(identity, msg)
+    end
+
     def <<(msg) : self
       send(msg)
     end
@@ -135,6 +155,14 @@ module OMQ
       self
     rescue Channel::ClosedError
       raise ClosedError.new("socket closed while sending")
+    end
+
+    private def send_to_frames(identity : Bytes, body : Message) : self
+      frames = Message.new(body.size + 2)
+      frames << identity.dup
+      frames << Bytes.empty
+      body.each { |frame| frames << frame }
+      send_frames(frames)
     end
   end
 end
