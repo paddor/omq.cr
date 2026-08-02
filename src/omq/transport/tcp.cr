@@ -139,11 +139,20 @@ module OMQ
 
       # Read messages from the wire and push them to `rx`.
       private def read_pump(zmtp : ZMTP::Connection, rx : Channel(Message), tx : Channel(Message), close_signal : Channel(Nil)) : Nil
+        messages_since_yield = 0
+        bytes_since_yield = 0
         loop do
           msg = zmtp.receive_message
           break unless msg
           begin
             rx.send(msg)
+            messages_since_yield += 1
+            bytes_since_yield += msg.reduce(0) { |sum, frame| sum + frame.size }
+            if messages_since_yield >= RECV_FAIRNESS_MESSAGES || bytes_since_yield >= RECV_FAIRNESS_BYTES
+              messages_since_yield = 0
+              bytes_since_yield = 0
+              Fiber.yield
+            end
           rescue Channel::ClosedError
             break
           end
