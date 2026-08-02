@@ -50,4 +50,12 @@ module OMQ::TestHelper
       raise "timed out after #{span}"
     end
   end
+
+  def self.wait_until(span : Time::Span = 2.seconds, interval : Time::Span = 1.millisecond, &block : -> Bool) : Nil
+    deadline = Time.instant + span
+    until block.call
+      raise "timed out waiting for condition" if Time.instant >= deadline
+      sleep interval
+    end
+  end
 end
