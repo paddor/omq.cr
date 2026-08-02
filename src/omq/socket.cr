@@ -153,10 +153,7 @@ module OMQ
       scheme, rest = parse_endpoint(endpoint)
       case scheme
       when "inproc"
-        Transport::Inproc.unbind(rest)
-        @inproc_names.delete(rest)
-        @bound_endpoints.delete(endpoint)
-        close_pipes_at(endpoint)
+        close_inproc_listener(rest, endpoint)
       when "tcp"
         close_matching_tcp_listeners(endpoint)
       when "ipc"
@@ -542,6 +539,20 @@ module OMQ
         pipe.close
         emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe)
       end
+    end
+
+    private def close_inproc_listener(name : String, endpoint : String) : Nil
+      should_unbind = @state_mutex.synchronize do
+        if @inproc_names.delete(name)
+          @bound_endpoints.delete(endpoint)
+          true
+        else
+          false
+        end
+      end
+
+      Transport::Inproc.unbind(name) if should_unbind
+      close_pipes_at(endpoint)
     end
 
     private def close_matching_tcp_listeners(endpoint : String) : Nil

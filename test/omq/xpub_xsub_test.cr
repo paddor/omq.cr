@@ -9,9 +9,7 @@ describe "XPUB/XSUB" do
       sub1.connect("inproc://xpx-fanout")
       sub2.connect("inproc://xpx-fanout")
 
-      while xpub.peer_count < 2
-        Fiber.yield
-      end
+      OMQ::TestHelper.wait_until { xpub.peer_count == 2 && sub1.peer_count == 1 && sub2.peer_count == 1 }
 
       xpub.send("hello")
 
@@ -30,9 +28,7 @@ describe "XPUB/XSUB" do
       xsub = OMQ::XSUB.new
       xsub.connect("inproc://xpx-subs")
 
-      while xpub.peer_count.zero?
-        Fiber.yield
-      end
+      OMQ::TestHelper.wait_until { xpub.peer_count == 1 && xsub.peer_count == 1 }
 
       xsub.subscribe("topic")
 
@@ -59,9 +55,7 @@ describe "XPUB/XSUB" do
       xsub.connect("inproc://xpx-bcast-1")
       xsub.connect("inproc://xpx-bcast-2")
 
-      while pub1.peer_count.zero? || pub2.peer_count.zero?
-        Fiber.yield
-      end
+      OMQ::TestHelper.wait_until { pub1.peer_count == 1 && pub2.peer_count == 1 && xsub.peer_count == 2 }
 
       xsub.subscribe("a")
 

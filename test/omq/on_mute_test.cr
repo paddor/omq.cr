@@ -9,9 +9,7 @@ describe "PUB on_mute" do
 
       sub = OMQ::SUB.connect("inproc://default-drop-newest", subscribe: "")
 
-      while pub.peer_count.zero?
-        Fiber.yield
-      end
+      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
 
       total = 2000
       total.times { |i| pub.send("msg-#{i}") }
@@ -44,9 +42,7 @@ describe "PUB on_mute" do
       sub.connect("inproc://drop-newest")
       sub.subscribe("")
 
-      while pub.peer_count.zero?
-        Fiber.yield
-      end
+      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
 
       # Fire far more than the HWM into a subscriber that isn't reading.
       1000.times { |i| pub.send("msg-#{i}") }
@@ -82,9 +78,7 @@ describe "PUB on_mute" do
       sub.connect("inproc://drop-oldest")
       sub.subscribe("")
 
-      while pub.peer_count.zero?
-        Fiber.yield
-      end
+      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
 
       1000.times { |i| pub.send("msg-#{i}") }
 
@@ -116,9 +110,7 @@ describe "PUB on_mute" do
       sub.connect("inproc://block-mute")
       sub.subscribe("")
 
-      while pub.peer_count.zero?
-        Fiber.yield
-      end
+      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
 
       20.times { |i| pub.send("msg-#{i}") }
 

@@ -11,9 +11,7 @@ describe "PUB conflate" do
       sub.connect("inproc://conflate-pub")
       sub.subscribe("")
 
-      while pub.peer_count.zero?
-        Fiber.yield
-      end
+      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
 
       100.times { |i| pub.send("msg-#{i}") }
 
@@ -40,9 +38,7 @@ describe "PUB conflate" do
       sub.connect("inproc://no-conflate-pub")
       sub.subscribe("")
 
-      while pub.peer_count.zero?
-        Fiber.yield
-      end
+      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
 
       10.times { |i| pub.send("msg-#{i}") }
 

@@ -86,9 +86,7 @@ describe "Stress tests" do
         OMQ::SUB.connect("inproc://stress-pubsub", subscribe: "", read_timeout: 1.second)
       end
 
-      until pub.peer_count == sub_count
-        Fiber.yield
-      end
+      OMQ::TestHelper.wait_until { pub.peer_count == sub_count && subs.all? { |sub| sub.peer_count == 1 } }
 
       total.times { |i| pub.send("msg-#{i}") }
       subs.each do |sub|

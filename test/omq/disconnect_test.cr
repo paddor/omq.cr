@@ -62,6 +62,36 @@ describe "disconnect / unbind" do
     end
   end
 
+  it "#unbind races cleanly with close for inproc endpoints" do
+    OMQ::TestHelper.with_timeout(3.seconds) do
+      100.times do |i|
+        endpoint = "inproc://unbind-close-race-#{i}"
+        pull = OMQ::PULL.bind(endpoint)
+        done = Channel(Exception?).new(2)
+
+        spawn do
+          pull.unbind(endpoint)
+          done.send(nil)
+        rescue ex
+          done.send(ex)
+        end
+
+        spawn do
+          pull.close
+          done.send(nil)
+        rescue ex
+          done.send(ex)
+        end
+
+        2.times do
+          ex = done.receive
+          raise ex if ex
+        end
+        pull.close
+      end
+    end
+  end
+
   it "#unbind closes accepted TCP pipes and removes the canonical endpoint" do
     OMQ::TestHelper.with_timeout(3.seconds) do
       pull = OMQ::PULL.bind("tcp://127.0.0.1:0")

@@ -112,6 +112,46 @@ describe "PUB/SUB over inproc" do
       pub.close
     end
   end
+
+  it "fans out to multiple subscribers" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      pub = OMQ::PUB.bind("inproc://ps-fanout")
+      subs = Array.new(3) { OMQ::SUB.connect("inproc://ps-fanout", subscribe: "") }
+
+      OMQ::TestHelper.wait_until { pub.peer_count == 3 && subs.all? { |sub| sub.peer_count == 1 } }
+
+      pub.send(["broadcast".to_slice, "payload".to_slice])
+
+      subs.each do |sub|
+        assert_equal ["broadcast", "payload"], sub.receive.map { |frame| String.new(frame) }
+      end
+
+      subs.each(&.close)
+      pub.close
+    end
+  end
+
+  it "receives from multiple publishers" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      pub1 = OMQ::PUB.bind("inproc://ps-source-1")
+      pub2 = OMQ::PUB.bind("inproc://ps-source-2")
+      sub = OMQ::SUB.new(subscribe: "")
+      sub.connect("inproc://ps-source-1")
+      sub.connect("inproc://ps-source-2")
+
+      OMQ::TestHelper.wait_until { pub1.peer_count == 1 && pub2.peer_count == 1 && sub.peer_count == 2 }
+
+      pub1.send("from-1")
+      pub2.send("from-2")
+
+      received = Array.new(2) { String.new(sub.receive[0]) }
+      assert_equal ["from-1", "from-2"], received.sort
+
+      sub.close
+      pub1.close
+      pub2.close
+    end
+  end
 end
 
 describe "PUB/SUB over TCP" do
@@ -154,6 +194,53 @@ describe "PUB/SUB over TCP" do
       sub.close
       pub.close
     end
+  end
+
+  it "fans out to multiple subscribers" do
+    OMQ::TestHelper.with_timeout(3.seconds) do
+      pub = OMQ::PUB.bind("tcp://127.0.0.1:0")
+      port = pub.port.not_nil!
+      subs = Array.new(3) do
+        OMQ::SUB.connect("tcp://127.0.0.1:#{port}", subscribe: "", read_timeout: 1.second)
+      end
+
+      OMQ::TestHelper.wait_until { pub.peer_count == 3 && subs.all? { |sub| sub.peer_count == 1 } }
+
+      pub.send(["broadcast".to_slice, "payload".to_slice])
+
+      subs.each do |sub|
+        assert_equal ["broadcast", "payload"], sub.receive.map { |frame| String.new(frame) }
+      end
+
+      subs.each(&.close)
+      pub.close
+    end
+  end
+end
+
+describe "PUB/SUB over IPC" do
+  it "fans out to multiple subscribers" do
+    path = "/tmp/omq-ps-ipc-fanout-#{Process.pid}.sock"
+    File.delete(path) if File.exists?(path)
+
+    OMQ::TestHelper.with_timeout(3.seconds) do
+      endpoint = "ipc://#{path}"
+      pub = OMQ::PUB.bind(endpoint)
+      subs = Array.new(3) { OMQ::SUB.connect(endpoint, subscribe: "", read_timeout: 1.second) }
+
+      OMQ::TestHelper.wait_until { pub.peer_count == 3 && subs.all? { |sub| sub.peer_count == 1 } }
+
+      pub.send(["broadcast".to_slice, "payload".to_slice])
+
+      subs.each do |sub|
+        assert_equal ["broadcast", "payload"], sub.receive.map { |frame| String.new(frame) }
+      end
+
+      subs.each(&.close)
+      pub.close
+    end
+  ensure
+    File.delete(path) if path && File.exists?(path)
   end
 end
 

@@ -1,7 +1,6 @@
 require "./system_test_helper"
 require "../../src/omq/peer"
 
-
 describe "Crystal PEER ↔ Ruby PEER over TCP" do
   it "round-trips an addressed message via routing IDs" do
     if OMQ::SystemTestHelper.ruby_bin.nil?
@@ -18,11 +17,8 @@ describe "Crystal PEER ↔ Ruby PEER over TCP" do
         # Wait for the bind-side (Ruby) peer to assign us a routing ID
         # locally on our own side too. We discover the peer's ID by
         # polling our own #peer_routing_ids.
+        OMQ::SystemTestHelper.wait_until { !peer.peer_routing_ids.empty? }
         ids = peer.peer_routing_ids
-        while ids.empty?
-          Fiber.yield
-          ids = peer.peer_routing_ids
-        end
         remote_id = ids[0]
 
         peer.send_to(remote_id, "hello")

@@ -163,4 +163,77 @@ describe "PUSH/PULL over TCP" do
       pull.close
     end
   end
+
+  it "delivers queued messages when connect happens before bind" do
+    OMQ::TestHelper.with_timeout(5.seconds) do
+      port = OMQ::TestHelper.free_tcp_port
+      endpoint = "tcp://127.0.0.1:#{port}"
+      push = OMQ::PUSH.new(linger: 1.second, reconnect_interval: 20.milliseconds)
+      events = push.monitor
+      push.connect(endpoint)
+
+      OMQ::TestHelper.wait_monitor_event(events, OMQ::MonitorEvent::Kind::ConnectDelayed)
+      push.send("early")
+
+      pull = OMQ::PULL.bind(endpoint)
+      OMQ::TestHelper.wait_until { push.peer_count > 0 && pull.peer_count > 0 }
+      push.send("late")
+
+      assert_equal "early", String.new(pull.receive[0])
+      assert_equal "late", String.new(pull.receive[0])
+
+      push.close
+      pull.close
+    end
+  end
+end
+
+describe "PUSH/PULL over IPC" do
+  it "delivers messages when bind happens before connect" do
+    path = "/tmp/omq-pp-ipc-bind-before-connect-#{Process.pid}.sock"
+    File.delete(path) if File.exists?(path)
+
+    OMQ::TestHelper.with_timeout(3.seconds) do
+      pull = OMQ::PULL.bind("ipc://#{path}")
+      push = OMQ::PUSH.connect("ipc://#{path}")
+      OMQ::TestHelper.wait_until { push.peer_count > 0 && pull.peer_count > 0 }
+
+      5.times { |i| push.send("msg-#{i}") }
+      5.times do |i|
+        assert_equal "msg-#{i}", String.new(pull.receive[0])
+      end
+
+      push.close
+      pull.close
+    end
+  ensure
+    File.delete(path) if path && File.exists?(path)
+  end
+
+  it "delivers queued messages when connect happens before bind" do
+    path = "/tmp/omq-pp-ipc-connect-before-bind-#{Process.pid}.sock"
+    File.delete(path) if File.exists?(path)
+
+    OMQ::TestHelper.with_timeout(5.seconds) do
+      endpoint = "ipc://#{path}"
+      push = OMQ::PUSH.new(linger: 1.second, reconnect_interval: 20.milliseconds)
+      events = push.monitor
+      push.connect(endpoint)
+
+      OMQ::TestHelper.wait_monitor_event(events, OMQ::MonitorEvent::Kind::ConnectDelayed)
+      push.send("early")
+
+      pull = OMQ::PULL.bind(endpoint)
+      OMQ::TestHelper.wait_until { push.peer_count > 0 && pull.peer_count > 0 }
+      push.send("late")
+
+      assert_equal "early", String.new(pull.receive[0])
+      assert_equal "late", String.new(pull.receive[0])
+
+      push.close
+      pull.close
+    end
+  ensure
+    File.delete(path) if path && File.exists?(path)
+  end
 end

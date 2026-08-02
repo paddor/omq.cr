@@ -1,21 +1,16 @@
 require "minitest/autorun"
 require "../../src/omq"
 
-
 module OMQ::SystemTestHelper
-
   # Ruby interpreter. Overridable via OMQ_RUBY_BIN; otherwise `ruby`
   # is resolved from PATH.
   RUBY_BIN = ENV["OMQ_RUBY_BIN"]? || "ruby"
 
-
   SCRIPTS_DIR = File.expand_path("scripts", __DIR__)
-
 
   # Cached ruby path (nil = `ruby` can't load the `omq` gem).
   @@ruby_bin : String? = nil
   @@probed = false
-
 
   def self.ruby_bin : String?
     return @@ruby_bin if @@probed
@@ -28,7 +23,6 @@ module OMQ::SystemTestHelper
   rescue
     nil
   end
-
 
   # Spawn a Ruby script and read the `ENDPOINT=<uri>` it prints on its
   # first stdout line. Returns `{process, endpoint}`. The process keeps
@@ -43,7 +37,6 @@ module OMQ::SystemTestHelper
     {process, line.lchop("ENDPOINT=").strip}
   end
 
-
   # Read lines from the process's stdout until EOF or `count` lines
   # have been collected.
   def self.read_lines(process : Process, count : Int32) : Array(String)
@@ -56,12 +49,10 @@ module OMQ::SystemTestHelper
     lines
   end
 
-
   def self.shutdown(process : Process) : Nil
     process.input.close rescue nil
     process.wait rescue nil
   end
-
 
   # Fail the current test if `block` hasn't finished after `span`.
   def self.with_timeout(span : Time::Span, &block)
@@ -79,6 +70,14 @@ module OMQ::SystemTestHelper
       raise result.not_nil! if result
     when timeout(span)
       raise "timed out after #{span}"
+    end
+  end
+
+  def self.wait_until(span : Time::Span = 2.seconds, interval : Time::Span = 1.millisecond, &block : -> Bool) : Nil
+    deadline = Time.instant + span
+    until block.call
+      raise "timed out waiting for condition" if Time.instant >= deadline
+      sleep interval
     end
   end
 end

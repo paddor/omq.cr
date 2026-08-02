@@ -49,9 +49,7 @@ describe "Linger" do
       push = OMQ::PUSH.new
       push.linger = 2.seconds
       push.connect("tcp://127.0.0.1:#{port}")
-      until push.peer_count > 0 && pull.peer_count > 0
-        Fiber.yield
-      end
+      OMQ::TestHelper.wait_until { push.peer_count > 0 && pull.peer_count > 0 }
 
       20.times { |i| push.send("drain-#{i}") }
       push.close

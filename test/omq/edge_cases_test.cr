@@ -57,7 +57,6 @@ describe "Edge cases" do
       20.times do |i|
         push = OMQ::PUSH.connect("inproc://edge-rapid", linger: 1.second)
         push.send("msg-#{i}")
-        Fiber.yield
         push.close
       end
 
