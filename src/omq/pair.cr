@@ -10,10 +10,12 @@ module OMQ
     SOCKET_TYPE = "PAIR"
 
     @pipe : Pipe?
-    @pipe_ready : Channel(Pipe)
+    @pipe_mutex : Mutex
+    @pipe_ready : Channel(Bool)
 
     def initialize(endpoint : String? = nil, **opts)
-      @pipe_ready = Channel(Pipe).new(1)
+      @pipe_mutex = Mutex.new
+      @pipe_ready = Channel(Bool).new(1)
       super(endpoint, **opts)
     end
 
@@ -55,22 +57,32 @@ module OMQ
     end
 
     protected def attach_pipe(pipe : Pipe) : Nil
-      if current = @pipe
-        @pipe = nil if current.closed?
+      accepted = @pipe_mutex.synchronize do
+        if current = @pipe
+          @pipe = nil if current.closed?
+        end
+
+        if @pipe
+          false
+        else
+          @pipe = pipe
+          true
+        end
       end
 
-      if @pipe
+      unless accepted
         # PAIR accepts only one peer; drop subsequent.
         pipe.close
         return
       end
-      @pipe_ready.send(pipe)
+
+      signal_pipe_ready
     rescue Channel::ClosedError
       pipe.close
     end
 
     protected def on_close : Nil
-      @pipe_ready.close
+      @pipe_ready.close unless @pipe_ready.closed?
     end
 
     private def send_frames(frames : Message) : self
@@ -82,38 +94,57 @@ module OMQ
     end
 
     private def await_pipe(timeout span : Time::Span? = nil) : Pipe
-      if pipe = active_pipe
-        return pipe
+      deadline = span ? Time.instant + span : nil
+      loop do
+        if pipe = active_pipe
+          return pipe
+        end
+
+        if deadline
+          remaining = deadline - Time.instant
+          raise IO::TimeoutError.new("no peer connected after #{span}") unless remaining.positive?
+
+          select
+          when ready = @pipe_ready.receive?
+            raise ClosedError.new("socket closed while waiting for peer") unless ready
+          when timeout(remaining)
+            raise IO::TimeoutError.new("no peer connected after #{span}")
+          end
+        else
+          raise ClosedError.new("socket closed while waiting for peer") unless @pipe_ready.receive?
+        end
       end
-      pipe = if span
-               select
-               when p = @pipe_ready.receive
-                 p
-               when timeout(span)
-                 raise IO::TimeoutError.new("no peer connected after #{span}")
-               end
-             else
-               @pipe_ready.receive
-             end
-      @pipe = pipe
-      pipe
     end
 
     private def await_pipe? : Pipe?
-      if pipe = active_pipe
-        return pipe
+      loop do
+        if pipe = active_pipe
+          return pipe
+        end
+
+        return nil unless @pipe_ready.receive?
       end
-      pipe = @pipe_ready.receive?
-      @pipe = pipe if pipe
-      pipe
     end
 
     private def active_pipe : Pipe?
-      if pipe = @pipe
-        return pipe unless pipe.closed?
-        @pipe = nil
+      @pipe_mutex.synchronize do
+        if pipe = @pipe
+          if pipe.closed?
+            @pipe = nil
+            nil
+          else
+            pipe
+          end
+        end
       end
-      nil
+    end
+
+    private def signal_pipe_ready : Nil
+      select
+      when @pipe_ready.send(true)
+      else
+      end
+    rescue Channel::ClosedError
     end
   end
 end

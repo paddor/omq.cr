@@ -51,6 +51,24 @@ describe "PAIR over inproc" do
     end
   end
 
+  it "keeps the first peer and drops a second connector" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      a = OMQ::PAIR.bind("inproc://pair-solo")
+      b1 = OMQ::PAIR.connect("inproc://pair-solo")
+      b2 = OMQ::PAIR.connect("inproc://pair-solo", write_timeout: 20.milliseconds)
+
+      OMQ::TestHelper.wait_until { a.peer_count == 1 && b1.peer_count == 1 }
+
+      a.send("to b1")
+      assert_equal "to b1", String.new(b1.receive[0])
+      assert_raises(IO::TimeoutError) { b2.send("to b2") }
+
+      a.close
+      b1.close
+      b2.close
+    end
+  end
+
   it "delivers messages when connect happens before bind" do
     OMQ::TestHelper.with_timeout(2.seconds) do
       b = OMQ::PAIR.connect("inproc://pair-connect-before-bind")
