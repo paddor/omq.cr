@@ -11,7 +11,7 @@ describe "REP connection loss with pending reply" do
       assert_equal "from-req1", String.new(rep.receive[0])
 
       req1.close
-      sleep 50.milliseconds
+      OMQ::TestHelper.wait_disconnected(rep)
 
       rep.send("reply-to-req1")
 

@@ -67,9 +67,7 @@ describe "REQ/REP over inproc" do
     OMQ::TestHelper.with_timeout(2.seconds) do
       router = OMQ::ROUTER.bind("inproc://rr-router-envelope")
       rep = OMQ::REP.connect("inproc://rr-router-envelope", identity: "rep-peer")
-      until router.peer_count == 1 && rep.peer_count == 1
-        sleep 1.millisecond
-      end
+      OMQ::TestHelper.wait_until { router.peer_count == 1 && rep.peer_count == 1 }
 
       router.send([
         "rep-peer".to_slice,

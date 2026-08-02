@@ -1,11 +1,7 @@
 require "../test_helper"
 
 private def wait_connection_count(socket : OMQ::Socket, count : Int32, span : Time::Span = 2.seconds) : Nil
-  deadline = Time.instant + span
-  until socket.peer_count >= count
-    raise "timed out waiting for #{count} peers" if Time.instant >= deadline
-    sleep 1.millisecond
-  end
+  OMQ::TestHelper.wait_until(span) { socket.peer_count >= count }
 end
 
 private def drain_count(socket) : Int32
@@ -64,9 +60,7 @@ describe "mixed transports" do
       assert_equal 2, drain_count(pull_inproc) + drain_count(pull_tcp)
 
       pull_tcp.close
-      until push.peer_count == 1
-        sleep 1.millisecond
-      end
+      OMQ::TestHelper.wait_until { push.peer_count == 1 }
 
       pull_inproc.read_timeout = nil
       push.send("inproc-again")

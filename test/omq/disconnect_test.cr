@@ -68,9 +68,7 @@ describe "disconnect / unbind" do
       port = pull.port.not_nil!
       push = OMQ::PUSH.connect("tcp://127.0.0.1:#{port}", linger: 0.seconds, reconnect_interval: 1.second)
 
-      until pull.peer_count == 1 && push.peer_count == 1
-        sleep 1.millisecond
-      end
+      OMQ::TestHelper.wait_until { pull.peer_count == 1 && push.peer_count == 1 }
 
       pull.unbind("tcp://127.0.0.1:#{port}")
       assert_equal 0, pull.peer_count

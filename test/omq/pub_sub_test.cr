@@ -52,7 +52,7 @@ describe "PUB/SUB over inproc" do
       sub.connect("inproc://ps-filter")
       ch = collect(sub)
 
-      sleep 5.milliseconds
+      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
 
       100.times do
         pub.send(["A.one".to_slice, "payload".to_slice])
@@ -92,7 +92,7 @@ describe "PUB/SUB over inproc" do
       sub.connect("inproc://ps-catchall")
       ch = collect(sub)
 
-      sleep 5.milliseconds
+      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
 
       got_any = false
       30.times do
@@ -124,7 +124,7 @@ describe "PUB/SUB over TCP" do
       sub.connect("tcp://127.0.0.1:#{port}")
       ch = collect(sub)
 
-      sleep 30.milliseconds
+      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
 
       50.times do
         pub.send(["hot.news".to_slice, "body".to_slice])
@@ -204,9 +204,7 @@ describe "PUB/SUB options" do
       sub.connect("inproc://pubsub-unbounded")
       sub.subscribe("")
 
-      while pub.peer_count.zero?
-        Fiber.yield
-      end
+      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
 
       pub.send("hello")
 

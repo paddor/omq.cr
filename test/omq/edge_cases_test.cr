@@ -83,9 +83,7 @@ describe "Edge cases" do
 
       10.times do |i|
         push = OMQ::PUSH.connect("tcp://127.0.0.1:#{port}", linger: 1.second)
-        until push.peer_count == 1
-          sleep 1.millisecond
-        end
+        OMQ::TestHelper.wait_until { push.peer_count == 1 }
         push.send("msg-#{i}")
         push.close
       end

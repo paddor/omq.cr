@@ -179,9 +179,7 @@ describe "SUB constructor subscription" do
         subscribe: "news",
         read_timeout: 500.milliseconds,
       )
-      until pub.peer_count == 1
-        sleep 1.millisecond
-      end
+      OMQ::TestHelper.wait_until { pub.peer_count == 1 && sub.peer_count == 1 }
 
       pub.send(["sports".to_slice, "drop".to_slice])
       pub.send(["news.today".to_slice, "keep".to_slice])

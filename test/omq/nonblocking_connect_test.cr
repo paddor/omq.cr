@@ -1,10 +1,7 @@
 require "../test_helper"
 
 private def unused_tcp_port : Int32
-  server = TCPServer.new("127.0.0.1", 0)
-  port = server.local_address.port
-  server.close
-  port
+  OMQ::TestHelper.free_tcp_port
 end
 
 describe "Non-blocking TCP connect" do
@@ -26,14 +23,14 @@ describe "Non-blocking TCP connect" do
   it "connects in the background when the server appears later" do
     OMQ::TestHelper.with_timeout(3.seconds) do
       port = unused_tcp_port
-      req = OMQ::REQ.connect(
-        "tcp://127.0.0.1:#{port}",
-        linger: 0.seconds,
-        reconnect_interval: 20.milliseconds,
-      )
+      endpoint = "tcp://127.0.0.1:#{port}"
+      req = OMQ::REQ.new(linger: 0.seconds, reconnect_interval: 20.milliseconds)
+      events = req.monitor
+      req.connect(endpoint)
 
-      sleep 50.milliseconds
-      rep = OMQ::REP.bind("tcp://127.0.0.1:#{port}", linger: 0.seconds)
+      OMQ::TestHelper.wait_monitor_event(events, OMQ::MonitorEvent::Kind::ConnectDelayed)
+
+      rep = OMQ::REP.bind(endpoint, linger: 0.seconds)
       OMQ::TestHelper.wait_until { req.peer_count > 0 && rep.peer_count > 0 }
 
       req.send("async connect")

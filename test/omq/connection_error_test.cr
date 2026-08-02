@@ -4,12 +4,14 @@ require "socket"
 describe "Connection error handling" do
   it "server survives client disconnect during TCP handshake" do
     OMQ::TestHelper.with_timeout(3.seconds) do
-      rep = OMQ::REP.bind("tcp://127.0.0.1:0", linger: 0.seconds)
+      rep = OMQ::REP.new(linger: 0.seconds)
+      events = rep.monitor
+      rep.bind("tcp://127.0.0.1:0")
       port = rep.port.not_nil!
 
       raw = TCPSocket.new("127.0.0.1", port)
       raw.close
-      sleep 20.milliseconds
+      OMQ::TestHelper.wait_monitor_event(events, OMQ::MonitorEvent::Kind::HandshakeFailed)
 
       req = OMQ::REQ.connect("tcp://127.0.0.1:#{port}", linger: 0.seconds)
       req.send("after reset")
@@ -26,11 +28,13 @@ describe "Connection error handling" do
     File.delete(path) if File.exists?(path)
 
     OMQ::TestHelper.with_timeout(3.seconds) do
-      rep = OMQ::REP.bind("ipc://#{path}", linger: 0.seconds)
+      rep = OMQ::REP.new(linger: 0.seconds)
+      events = rep.monitor
+      rep.bind("ipc://#{path}")
 
       raw = UNIXSocket.new(path)
       raw.close
-      sleep 20.milliseconds
+      OMQ::TestHelper.wait_monitor_event(events, OMQ::MonitorEvent::Kind::HandshakeFailed)
 
       req = OMQ::REQ.connect("ipc://#{path}", linger: 0.seconds)
       req.send("after reset")
@@ -63,7 +67,7 @@ describe "Connection error handling" do
       assert_equal "world", String.new(req.receive[0])
 
       rep.close
-      sleep 50.milliseconds
+      OMQ::TestHelper.wait_disconnected(req)
 
       rep2 = OMQ::REP.bind("ipc://#{path}", linger: 0.seconds)
       OMQ::TestHelper.wait_until { req.peer_count > 0 && rep2.not_nil!.peer_count > 0 }
