@@ -14,25 +14,34 @@ module OMQ
     getter options : Options
     getter? closed : Bool = false
 
-    @inproc_names  = [] of String
+    @inproc_names = [] of String
     @tcp_listeners = [] of Transport::TCP::Listener
     @ipc_listeners = [] of Transport::IPC::Listener
-    @pipes         = [] of Pipe
-    @committed     = false
-    @shutdown      = Channel(Nil).new
-    @monitor       : Channel(MonitorEvent)? = nil
+    @bound_endpoints = [] of String
+    @disabled_connect_endpoints = [] of String
+    @pipe_endpoints = {} of Pipe => String
+    @pipes = [] of Pipe
+    @committed = false
+    @shutdown = Channel(Nil).new
+    @monitor : Channel(MonitorEvent)? = nil
 
-    def initialize(endpoint : String? = nil)
+    private struct UnsetOption
+    end
+
+    UNSET = UnsetOption.new
+
+    def initialize(endpoint : String? = nil, **opts)
       @options = Options.new
+      apply_options(**opts)
       attach(endpoint) if endpoint
     end
 
-    def self.bind(endpoint : String) : self
-      new("@#{endpoint}")
+    def self.bind(endpoint : String, **opts) : self
+      new("@#{endpoint}", **opts)
     end
 
-    def self.connect(endpoint : String) : self
-      new(">#{endpoint}")
+    def self.connect(endpoint : String, **opts) : self
+      new(">#{endpoint}", **opts)
     end
 
     def attach(endpoint : String) : self
@@ -45,7 +54,7 @@ module OMQ
         case self.class.default_action
         when :bind    then bind(endpoint)
         when :connect then connect(endpoint)
-        else raise InvalidEndpoint.new("unknown default action")
+        else               raise InvalidEndpoint.new("unknown default action")
         end
       end
       self
@@ -58,16 +67,19 @@ module OMQ
       when "inproc"
         listener = Transport::Inproc.bind(rest)
         @inproc_names << rest
+        @bound_endpoints << endpoint
         emit_monitor(MonitorEvent::Kind::Listening, endpoint)
         spawn accept_inproc(listener, endpoint)
       when "tcp"
         listener = Transport::TCP.bind(endpoint)
         @tcp_listeners << listener
+        @bound_endpoints << listener.endpoint
         emit_monitor(MonitorEvent::Kind::Listening, endpoint)
         spawn accept_tcp(listener, endpoint)
       when "ipc"
         listener = Transport::IPC.bind(endpoint)
         @ipc_listeners << listener
+        @bound_endpoints << listener.endpoint
         emit_monitor(MonitorEvent::Kind::Listening, endpoint)
         spawn accept_ipc(listener, endpoint)
       else
@@ -76,14 +88,14 @@ module OMQ
       self
     end
 
-
     def connect(endpoint : String) : self
       commit_options
+      enable_connect_endpoint(endpoint)
       scheme, rest = parse_endpoint(endpoint)
       case scheme
       when "inproc"
         pipe = Transport::Inproc.connect(rest, capacity: @options.recv_hwm, local_identity: @options.identity)
-        register_pipe(pipe)
+        register_pipe(pipe, endpoint)
         emit_monitor(MonitorEvent::Kind::Connected, endpoint, pipe)
       when "tcp", "ipc"
         # First attempt synchronously so a happy-path connect gives the
@@ -91,7 +103,7 @@ module OMQ
         # the retry loop in the background.
         begin
           pipe = dial(scheme, endpoint)
-          register_pipe(pipe)
+          register_pipe(pipe, endpoint)
           emit_monitor(MonitorEvent::Kind::Connected, endpoint, pipe)
           spawn supervise_pipe(pipe, scheme, endpoint)
         rescue err : IO::Error | ProtocolError
@@ -104,6 +116,32 @@ module OMQ
       self
     end
 
+    def disconnect(endpoint : String) : self
+      return self if @closed
+      parse_endpoint(endpoint)
+      disable_connect_endpoint(endpoint)
+      close_pipes_at(endpoint)
+      self
+    end
+
+    def unbind(endpoint : String) : self
+      return self if @closed
+      scheme, rest = parse_endpoint(endpoint)
+      case scheme
+      when "inproc"
+        Transport::Inproc.unbind(rest)
+        @inproc_names.delete(rest)
+        @bound_endpoints.delete(endpoint)
+        close_pipes_at(endpoint)
+      when "tcp"
+        close_matching_tcp_listeners(endpoint)
+      when "ipc"
+        close_matching_ipc_listeners(endpoint)
+      else
+        raise UnsupportedTransport.new(scheme)
+      end
+      self
+    end
 
     def close : Nil
       return if @closed
@@ -119,6 +157,9 @@ module OMQ
       on_close
     end
 
+    def inspect(io : IO) : Nil
+      io << "#<" << self.class.name << " bound=" << @bound_endpoints.inspect << ">"
+    end
 
     # Connection lifecycle subscription. Lazily creates a buffered channel
     # on first access; drop-on-full semantics so a slow subscriber never
@@ -127,7 +168,6 @@ module OMQ
     def monitor(capacity : Int32 = 128) : Channel(MonitorEvent)
       @monitor ||= Channel(MonitorEvent).new(capacity)
     end
-
 
     private def emit_monitor(kind : MonitorEvent::Kind, endpoint : String, pipe : Pipe? = nil, error : Exception? = nil) : Nil
       ch = @monitor
@@ -146,32 +186,32 @@ module OMQ
     private def supervise_pipe(pipe : Pipe, scheme : String, endpoint : String) : Nil
       pipe.await_closed
       return if @closed
-      @pipes.delete(pipe)
+      return unless unregister_pipe(pipe)
       emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe)
+      return if connect_endpoint_disabled?(endpoint)
       connection_manager(scheme, endpoint, initial_delay: nil)
     end
-
 
     # Retry loop for TCP/IPC: keeps dialing (with `reconnect_interval`
     # backoff) until a pipe succeeds, then supervises that pipe and loops
     # back. Exits when the socket is closed.
     private def connection_manager(scheme : String, endpoint : String, initial_delay : Time::Span?) : Nil
       delay_hint = initial_delay
-      until @closed
+      until @closed || connect_endpoint_disabled?(endpoint)
         delay_hint = next_reconnect_delay(delay_hint)
         break unless sleep_with_shutdown(delay_hint)
-        break if @closed
+        break if @closed || connect_endpoint_disabled?(endpoint)
         begin
           pipe = dial(scheme, endpoint)
         rescue err : IO::Error | ProtocolError
           emit_monitor(MonitorEvent::Kind::ConnectRetried, endpoint, error: err)
           next
         end
-        register_pipe(pipe)
+        register_pipe(pipe, endpoint)
         emit_monitor(MonitorEvent::Kind::Connected, endpoint, pipe)
         pipe.await_closed
-        break if @closed
-        @pipes.delete(pipe)
+        break if @closed || connect_endpoint_disabled?(endpoint)
+        next unless unregister_pipe(pipe)
         emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe)
         delay_hint = nil
       end
@@ -309,6 +349,49 @@ module OMQ
     # ZMTP socket-type string for the READY command. Concrete types override.
     protected abstract def socket_type : String
 
+    protected def apply_options(
+      *,
+      send_hwm : Int32? = nil,
+      recv_hwm : Int32? = nil,
+      linger : Time::Span | Nil | UnsetOption = UNSET,
+      identity : String | Bytes | Nil = nil,
+      read_timeout : Time::Span? = nil,
+      write_timeout : Time::Span? = nil,
+      recv_timeout : Time::Span? = nil,
+      send_timeout : Time::Span? = nil,
+      reconnect_interval : Time::Span | Range(Time::Span, Time::Span) | Nil = nil,
+      heartbeat_interval : Time::Span? = nil,
+      heartbeat_ttl : Time::Span? = nil,
+      heartbeat_timeout : Time::Span? = nil,
+      max_message_size : Int64? = nil,
+      sndbuf : Int32? = nil,
+      rcvbuf : Int32? = nil,
+      on_mute : Options::MuteStrategy | Symbol | Nil = nil,
+      conflate : Bool? = nil,
+      mechanism : ZMTP::Mechanism? = nil,
+      router_mandatory : Bool? = nil,
+    ) : Nil
+      @options.send_hwm = send_hwm if send_hwm
+      @options.recv_hwm = recv_hwm if recv_hwm
+      @options.linger = linger unless linger.is_a?(UnsetOption)
+      @options.identity = identity if identity
+      @options.read_timeout = read_timeout if read_timeout
+      @options.write_timeout = write_timeout if write_timeout
+      @options.recv_timeout = recv_timeout if recv_timeout
+      @options.send_timeout = send_timeout if send_timeout
+      @options.reconnect_interval = reconnect_interval if reconnect_interval
+      @options.heartbeat_interval = heartbeat_interval if heartbeat_interval
+      @options.heartbeat_ttl = heartbeat_ttl if heartbeat_ttl
+      @options.heartbeat_timeout = heartbeat_timeout if heartbeat_timeout
+      @options.max_message_size = max_message_size if max_message_size
+      @options.sndbuf = sndbuf if sndbuf
+      @options.rcvbuf = rcvbuf if rcvbuf
+      @options.on_mute = on_mute if on_mute
+      @options.conflate = conflate unless conflate.nil?
+      @options.mechanism = mechanism if mechanism
+      @options.router_mandatory = router_mandatory unless router_mandatory.nil?
+    end
+
     # Subclasses override to tear down their strategy.
     protected def on_close : Nil
     end
@@ -340,23 +423,68 @@ module OMQ
       {endpoint[0...idx], endpoint[idx + 3..]}
     end
 
-    private def register_pipe(pipe : Pipe) : Nil
-      if @closed
+    private def register_pipe(pipe : Pipe, endpoint : String) : Nil
+      if @closed || connect_endpoint_disabled?(endpoint)
         pipe.close
         return
       end
       @pipes << pipe
+      @pipe_endpoints[pipe] = endpoint
       attach_pipe(pipe)
+    end
+
+    private def unregister_pipe(pipe : Pipe) : String?
+      @pipes.delete(pipe)
+      @pipe_endpoints.delete(pipe)
+    end
+
+    private def enable_connect_endpoint(endpoint : String) : Nil
+      @disabled_connect_endpoints.delete(endpoint)
+    end
+
+    private def disable_connect_endpoint(endpoint : String) : Nil
+      @disabled_connect_endpoints << endpoint unless @disabled_connect_endpoints.includes?(endpoint)
+    end
+
+    private def connect_endpoint_disabled?(endpoint : String) : Bool
+      @disabled_connect_endpoints.includes?(endpoint)
+    end
+
+    private def close_pipes_at(endpoint : String) : Nil
+      @pipes.select { |pipe| @pipe_endpoints[pipe]? == endpoint }.each do |pipe|
+        unregister_pipe(pipe)
+        pipe.close
+        emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe)
+      end
+    end
+
+    private def close_matching_tcp_listeners(endpoint : String) : Nil
+      _scheme, rest = parse_endpoint(endpoint)
+      _host, port = Transport::TCP.parse_authority(rest)
+      @tcp_listeners.select { |listener| listener.endpoint == endpoint || listener.port == port }.each do |listener|
+        listener.close
+        @tcp_listeners.delete(listener)
+        @bound_endpoints.delete(listener.endpoint)
+        close_pipes_at(listener.endpoint)
+      end
+    end
+
+    private def close_matching_ipc_listeners(endpoint : String) : Nil
+      @ipc_listeners.select { |listener| listener.endpoint == endpoint }.each do |listener|
+        listener.close
+        @ipc_listeners.delete(listener)
+        @bound_endpoints.delete(listener.endpoint)
+        close_pipes_at(listener.endpoint)
+      end
     end
 
     private def accept_inproc(listener : Transport::Inproc::Listener, endpoint : String) : Nil
       while pipe = listener.incoming.receive?
         break if @closed
-        register_pipe(pipe)
+        register_pipe(pipe, endpoint)
         emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
       end
     end
-
 
     private def accept_tcp(listener : Transport::TCP::Listener, endpoint : String) : Nil
       loop do
@@ -379,7 +507,7 @@ module OMQ
             sndbuf: @options.sndbuf,
             rcvbuf: @options.rcvbuf,
           )
-          register_pipe(pipe)
+          register_pipe(pipe, endpoint)
           emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
         rescue err : IO::Error | ProtocolError
           tcp.close rescue nil
@@ -387,7 +515,6 @@ module OMQ
         end
       end
     end
-
 
     private def accept_ipc(listener : Transport::IPC::Listener, endpoint : String) : Nil
       loop do
@@ -410,7 +537,7 @@ module OMQ
             sndbuf: @options.sndbuf,
             rcvbuf: @options.rcvbuf,
           )
-          register_pipe(pipe)
+          register_pipe(pipe, endpoint)
           emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
         rescue err : IO::Error | ProtocolError
           unix.close rescue nil
@@ -426,9 +553,9 @@ module OMQ
       router_mandatory?, to: @options
 
     {% for m in %w(send_hwm recv_hwm linger identity read_timeout write_timeout
-                   recv_timeout send_timeout reconnect_interval heartbeat_interval
-                   heartbeat_ttl heartbeat_timeout max_message_size sndbuf rcvbuf
-                   on_mute conflate mechanism router_mandatory) %}
+                  recv_timeout send_timeout reconnect_interval heartbeat_interval
+                  heartbeat_ttl heartbeat_timeout max_message_size sndbuf rcvbuf
+                  on_mute conflate mechanism router_mandatory) %}
       def {{m.id}}=(val)
         @options.{{m.id}} = val
       end

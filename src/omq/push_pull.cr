@@ -7,9 +7,9 @@ module OMQ
 
     @strategy : Routing::Push
 
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @strategy = Routing::Push.new(Options::DEFAULT_HWM)
-      super(endpoint)
+      super(endpoint, **opts)
     end
 
     def send(msg : String) : self
@@ -64,7 +64,6 @@ module OMQ
     end
   end
 
-
   # PULL: read-only, fair-queue receive from PUSH peers.
   class PULL < Socket
     @@default_action = :bind
@@ -73,9 +72,9 @@ module OMQ
 
     @strategy : Routing::Pull
 
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @strategy = Routing::Pull.new(Options::DEFAULT_HWM)
-      super(endpoint)
+      super(endpoint, **opts)
     end
 
     protected def on_commit_options : Nil

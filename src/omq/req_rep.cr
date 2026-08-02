@@ -8,9 +8,9 @@ module OMQ
 
     @strategy : Routing::Req
 
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @strategy = Routing::Req.new(Options::DEFAULT_HWM, Options::DEFAULT_HWM)
-      super(endpoint)
+      super(endpoint, **opts)
     end
 
     protected def on_commit_options : Nil
@@ -67,7 +67,6 @@ module OMQ
     end
   end
 
-
   # REP: strict receive/send alternation; reply is routed back to the
   # pipe the request came from.
   class REP < Socket
@@ -77,9 +76,9 @@ module OMQ
 
     @strategy : Routing::Rep
 
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @strategy = Routing::Rep.new(Options::DEFAULT_HWM, Options::DEFAULT_HWM)
-      super(endpoint)
+      super(endpoint, **opts)
     end
 
     protected def on_commit_options : Nil

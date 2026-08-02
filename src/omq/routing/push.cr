@@ -57,11 +57,11 @@ module OMQ
       end
 
       private def pump(pipe : Pipe) : Nil
-        while msg = @tx.receive?
+        while msg = receive_send(@tx, pipe)
           begin
             pipe.tx.send(msg)
           rescue Channel::ClosedError
-            # peer gone; in-flight message drops (matches libzmq)
+            restore_send(@tx, msg)
             break
           end
         end

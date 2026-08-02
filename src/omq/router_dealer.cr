@@ -8,9 +8,9 @@ module OMQ
 
     @strategy : Routing::Dealer
 
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @strategy = Routing::Dealer.new(Options::DEFAULT_HWM, Options::DEFAULT_HWM)
-      super(endpoint)
+      super(endpoint, **opts)
     end
 
     protected def on_commit_options : Nil
@@ -67,7 +67,6 @@ module OMQ
     end
   end
 
-
   # ROUTER: async REP. On receive, prepends the originating peer's
   # identity as the first frame. On send, the first frame selects the
   # target peer by identity.
@@ -78,9 +77,9 @@ module OMQ
 
     @strategy : Routing::Router
 
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @strategy = Routing::Router.new(Options::DEFAULT_HWM, Options::DEFAULT_HWM)
-      super(endpoint)
+      super(endpoint, **opts)
     end
 
     protected def on_commit_options : Nil

@@ -11,34 +11,27 @@ module OMQ
   class CHANNEL < Socket
     @@default_action = :connect
 
-
     SOCKET_TYPE = "CHANNEL"
-
 
     @pipe : Pipe?
     @pipe_ready : ::Channel(Pipe)
 
-
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @pipe_ready = ::Channel(Pipe).new(1)
-      super(endpoint)
+      super(endpoint, **opts)
     end
-
 
     def send(msg : String) : self
       send_frames([msg.to_slice])
     end
 
-
     def send(msg : Bytes) : self
       send_frames([msg])
     end
 
-
     def <<(msg) : self
       send(msg)
     end
-
 
     def receive : Message
       pipe = await_pipe(@options.read_timeout)
@@ -47,20 +40,21 @@ module OMQ
       raise ClosedError.new("socket closed while receiving")
     end
 
-
     def receive? : Message?
       pipe = await_pipe?
       return nil unless pipe
       pipe.rx.receive?
     end
 
-
     protected def socket_type : String
       SOCKET_TYPE
     end
 
-
     protected def attach_pipe(pipe : Pipe) : Nil
+      if current = @pipe
+        @pipe = nil if current.closed?
+      end
+
       if @pipe
         # CHANNEL is 1-to-1; a second peer is dropped.
         pipe.close
@@ -71,11 +65,9 @@ module OMQ
       pipe.close
     end
 
-
     protected def on_close : Nil
       @pipe_ready.close
     end
-
 
     private def send_frames(frames : Message) : self
       pipe = await_pipe(@options.write_timeout)
@@ -85,9 +77,8 @@ module OMQ
       raise ClosedError.new("socket closed while sending")
     end
 
-
     private def await_pipe(timeout span : Time::Span? = nil) : Pipe
-      if pipe = @pipe
+      if pipe = active_pipe
         return pipe
       end
       pipe = if span
@@ -104,14 +95,21 @@ module OMQ
       pipe
     end
 
-
     private def await_pipe? : Pipe?
-      if pipe = @pipe
+      if pipe = active_pipe
         return pipe
       end
       pipe = @pipe_ready.receive?
       @pipe = pipe if pipe
       pipe
+    end
+
+    private def active_pipe : Pipe?
+      if pipe = @pipe
+        return pipe unless pipe.closed?
+        @pipe = nil
+      end
+      nil
     end
   end
 end

@@ -32,6 +32,22 @@ module OMQ
       def await_drained(span : Time::Span?) : Bool
         true
       end
+
+      protected def receive_send(channel : Channel(Message), pipe : Pipe) : Message?
+        return nil if pipe.closed? || pipe.close_signal.closed?
+
+        select
+        when msg = channel.receive?
+          msg
+        when pipe.close_signal.receive?
+          nil
+        end
+      end
+
+      protected def restore_send(channel : Channel(Message), msg : Message) : Nil
+        channel.send(msg)
+      rescue Channel::ClosedError
+      end
     end
   end
 end

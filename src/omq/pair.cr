@@ -9,9 +9,9 @@ module OMQ
     @pipe : Pipe?
     @pipe_ready : Channel(Pipe)
 
-    def initialize(endpoint : String? = nil)
+    def initialize(endpoint : String? = nil, **opts)
       @pipe_ready = Channel(Pipe).new(1)
-      super(endpoint)
+      super(endpoint, **opts)
     end
 
     def send(msg : String) : self
@@ -52,6 +52,10 @@ module OMQ
     end
 
     protected def attach_pipe(pipe : Pipe) : Nil
+      if current = @pipe
+        @pipe = nil if current.closed?
+      end
+
       if @pipe
         # PAIR accepts only one peer; drop subsequent.
         pipe.close
@@ -75,7 +79,7 @@ module OMQ
     end
 
     private def await_pipe(timeout span : Time::Span? = nil) : Pipe
-      if pipe = @pipe
+      if pipe = active_pipe
         return pipe
       end
       pipe = if span
@@ -93,12 +97,20 @@ module OMQ
     end
 
     private def await_pipe? : Pipe?
-      if pipe = @pipe
+      if pipe = active_pipe
         return pipe
       end
       pipe = @pipe_ready.receive?
       @pipe = pipe if pipe
       pipe
+    end
+
+    private def active_pipe : Pipe?
+      if pipe = @pipe
+        return pipe unless pipe.closed?
+        @pipe = nil
+      end
+      nil
     end
   end
 end

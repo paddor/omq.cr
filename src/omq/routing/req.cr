@@ -39,13 +39,14 @@ module OMQ
       end
 
       private def send_pump(pipe : Pipe) : Nil
-        while msg = @tx.receive?
+        while msg = receive_send(@tx, pipe)
           wire = Message.new(msg.size + 1)
           wire << EMPTY
           msg.each { |p| wire << p }
           begin
             pipe.tx.send(wire)
           rescue Channel::ClosedError
+            restore_send(@tx, msg)
             break
           end
         end

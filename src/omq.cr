@@ -36,3 +36,5 @@ require "./omq/router_dealer"
 # and the Ruby `omq` gem. No libzmq, no FFI.
 module OMQ
 end
+
+alias ØMQ = OMQ

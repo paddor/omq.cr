@@ -22,6 +22,7 @@ module OMQ
     # Wire-level subscribe encoding and PING eligibility key off this.
     property peer_zmtp_minor : UInt8 = ZMTP::MINOR_VERSION
 
+    getter close_signal : Channel(Nil)
 
     # Out-of-band channel for pre-encoded ZMTP commands (SUBSCRIBE/CANCEL).
     # Only populated for TCP/IPC pipes — inproc doesn't speak ZMTP on the
@@ -29,8 +30,7 @@ module OMQ
     # filters locally and doesn't need wire-level subscriptions).
     getter commands_tx : Channel(Bytes)? = nil
 
-
-    def initialize(@tx : Channel(Message), @rx : Channel(Message), @send_done : Channel(Nil) = Pipe.pre_closed_channel, @commands_tx : Channel(Bytes)? = nil)
+    def initialize(@tx : Channel(Message), @rx : Channel(Message), @send_done : Channel(Nil) = Pipe.pre_closed_channel, @commands_tx : Channel(Bytes)? = nil, @close_signal : Channel(Nil) = Channel(Nil).new)
     end
 
     # Best-effort send of a ZMTP command payload upstream. No-op if this
@@ -55,7 +55,8 @@ module OMQ
     def self.pair(capacity : Int32) : {Pipe, Pipe}
       a_to_b = Channel(Message).new(capacity)
       b_to_a = Channel(Message).new(capacity)
-      {Pipe.new(tx: a_to_b, rx: b_to_a), Pipe.new(tx: b_to_a, rx: a_to_b)}
+      close_signal = Channel(Nil).new
+      {Pipe.new(tx: a_to_b, rx: b_to_a, close_signal: close_signal), Pipe.new(tx: b_to_a, rx: a_to_b, close_signal: close_signal)}
     end
 
     # Stop accepting new outgoing messages; let the write pump flush
@@ -91,8 +92,9 @@ module OMQ
     end
 
     def close : Nil
-      @tx.close
-      @rx.close
+      @close_signal.close unless @close_signal.closed?
+      @tx.close unless @tx.closed?
+      @rx.close unless @rx.closed?
     end
 
     def closed? : Bool

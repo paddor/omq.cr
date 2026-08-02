@@ -33,10 +33,11 @@ module OMQ
       end
 
       private def send_pump(pipe : Pipe) : Nil
-        while msg = @tx.receive?
+        while msg = receive_send(@tx, pipe)
           begin
             pipe.tx.send(msg)
           rescue Channel::ClosedError
+            restore_send(@tx, msg)
             break
           end
         end

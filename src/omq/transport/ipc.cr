@@ -93,13 +93,14 @@ module OMQ
           as_server: as_server,
         )
 
-        tx          = Channel(Message).new(send_capacity)
-        rx          = Channel(Message).new(recv_capacity)
+        tx = Channel(Message).new(send_capacity)
+        rx = Channel(Message).new(recv_capacity)
         commands_tx = Channel(Bytes).new(send_capacity)
-        send_done   = Channel(Nil).new
+        send_done = Channel(Nil).new
+        close_signal = Channel(Nil).new
 
-        spawn write_pump(zmtp, tx, rx, commands_tx, send_done)
-        spawn read_pump(zmtp, rx, tx)
+        spawn write_pump(zmtp, tx, rx, commands_tx, send_done, close_signal)
+        spawn read_pump(zmtp, rx, tx, close_signal)
         # PING/PONG is a ZMTP 3.1 addition; skip against 3.0 peers.
         if (interval = heartbeat_interval) && zmtp.peer_minor >= 1
           spawn Transport.heartbeat_pump(
@@ -110,7 +111,7 @@ module OMQ
           )
         end
 
-        pipe = Pipe.new(tx: tx, rx: rx, send_done: send_done, commands_tx: commands_tx)
+        pipe = Pipe.new(tx: tx, rx: rx, send_done: send_done, commands_tx: commands_tx, close_signal: close_signal)
         pipe.peer_zmtp_minor = zmtp.peer_minor
         if identity = zmtp.peer_properties["Identity"]?
           pipe.peer_identity = identity
@@ -118,7 +119,7 @@ module OMQ
         pipe
       end
 
-      private def write_pump(zmtp : ZMTP::Connection, tx : Channel(Message), rx : Channel(Message), commands_tx : Channel(Bytes), send_done : Channel(Nil)) : Nil
+      private def write_pump(zmtp : ZMTP::Connection, tx : Channel(Message), rx : Channel(Message), commands_tx : Channel(Bytes), send_done : Channel(Nil), close_signal : Channel(Nil)) : Nil
         loop do
           select
           when msg = tx.receive
@@ -130,6 +131,7 @@ module OMQ
       rescue Channel::ClosedError | IO::Error | ProtocolError
         # one side closed or peer gone
       ensure
+        close_signal.close unless close_signal.closed?
         send_done.close
         tx.close
         rx.close
@@ -137,7 +139,7 @@ module OMQ
         zmtp.close
       end
 
-      private def read_pump(zmtp : ZMTP::Connection, rx : Channel(Message), tx : Channel(Message)) : Nil
+      private def read_pump(zmtp : ZMTP::Connection, rx : Channel(Message), tx : Channel(Message), close_signal : Channel(Nil)) : Nil
         loop do
           msg = zmtp.receive_message
           break unless msg
@@ -150,6 +152,7 @@ module OMQ
       rescue IO::Error | ProtocolError
         # peer gone
       ensure
+        close_signal.close unless close_signal.closed?
         rx.close
         tx.close
         zmtp.close
