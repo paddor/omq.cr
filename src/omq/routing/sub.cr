@@ -1,6 +1,5 @@
 module OMQ
   module Routing
-
     # SUB routing: one drain fiber per pipe, matching the message's first
     # frame (topic) against the subscription prefix list before forwarding
     # to the app.
@@ -16,24 +15,23 @@ module OMQ
     class Sub < Strategy
       getter rx : Channel(Message)
 
-
       def initialize(capacity : Int32)
-        @rx             = Channel(Message).new(capacity)
-        @prefixes       = [] of Bytes
+        @rx = Channel(Message).new(capacity)
+        @prefixes = [] of Bytes
         @prefixes_mutex = Mutex.new
-        @pipes          = [] of Pipe
-        @pipes_mutex    = Mutex.new
-        @closed         = false
+        @pipes = [] of Pipe
+        @pipes_mutex = Mutex.new
+        @closed = Atomic(Bool).new(false)
       end
 
       def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
-        return if @closed
+        return if closed?
         @rx = Channel(Message).new(recv_hwm)
       end
 
       def subscribe(prefix : Bytes) : Nil
         @prefixes_mutex.synchronize do
-          return if @prefixes.any? { |p| p == prefix }
+          return if closed? || @prefixes.any? { |p| p == prefix }
           @prefixes << prefix
         end
         broadcast_marker(0x01_u8, prefix)
@@ -48,7 +46,7 @@ module OMQ
       end
 
       def attach(pipe : Pipe) : Nil
-        return if @closed
+        return if closed?
         @pipes_mutex.synchronize { @pipes << pipe }
 
         # Replay current subscriptions so the new peer knows which
@@ -62,8 +60,7 @@ module OMQ
       end
 
       def close : Nil
-        return if @closed
-        @closed = true
+        return unless close_once
         @rx.close
       end
 

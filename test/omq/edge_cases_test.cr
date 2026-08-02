@@ -143,4 +143,42 @@ describe "Edge cases" do
       socket.close
     end
   end
+
+  it "close is safe from multiple fibers across stable sockets" do
+    sockets = [
+      OMQ::PAIR.new,
+      OMQ::PUSH.new,
+      OMQ::PULL.new,
+      OMQ::REQ.new,
+      OMQ::REP.new,
+      OMQ::DEALER.new,
+      OMQ::ROUTER.new,
+      OMQ::PUB.new,
+      OMQ::SUB.new,
+      OMQ::XPUB.new,
+      OMQ::XSUB.new,
+    ]
+
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      sockets.each do |socket|
+        done = Channel(Exception?).new(8)
+        8.times do
+          spawn do
+            socket.close
+            done.send(nil)
+          rescue ex
+            done.send(ex)
+          end
+        end
+
+        8.times do
+          ex = done.receive
+          raise ex if ex
+        end
+        assert socket.closed?
+      end
+    end
+  ensure
+    sockets.try(&.each(&.close))
+  end
 end

@@ -1,6 +1,5 @@
 module OMQ
   module Routing
-
     # DISH routing: fair-queue receive from RADIO peers, filtering by
     # joined group. The group is carried as the first frame of every
     # RADIO message; only messages whose group matches a joined group
@@ -13,22 +12,19 @@ module OMQ
     class Dish < Strategy
       getter rx : ::Channel(Message)
 
-
       def initialize(capacity : Int32)
-        @rx             = ::Channel(Message).new(capacity)
-        @groups         = Set(String).new
-        @groups_mutex   = Mutex.new
-        @pipes          = [] of Pipe
-        @pipes_mutex    = Mutex.new
-        @closed         = false
+        @rx = ::Channel(Message).new(capacity)
+        @groups = Set(String).new
+        @groups_mutex = Mutex.new
+        @pipes = [] of Pipe
+        @pipes_mutex = Mutex.new
+        @closed = Atomic(Bool).new(false)
       end
-
 
       def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
-        return if @closed
+        return if closed?
         @rx = ::Channel(Message).new(recv_hwm)
       end
-
 
       def join(group : String) : Nil
         @groups_mutex.synchronize do
@@ -37,7 +33,6 @@ module OMQ
         broadcast_group_command(0x01_u8, group)
       end
 
-
       def leave(group : String) : Nil
         @groups_mutex.synchronize do
           return unless @groups.delete(group)
@@ -45,9 +40,8 @@ module OMQ
         broadcast_group_command(0x00_u8, group)
       end
 
-
       def attach(pipe : Pipe) : Nil
-        return if @closed
+        return if closed?
         @pipes_mutex.synchronize { @pipes << pipe }
 
         # Replay current joins so a new peer knows our groups.
@@ -57,25 +51,20 @@ module OMQ
         spawn drain(pipe)
       end
 
-
       def close : Nil
-        return if @closed
-        @closed = true
+        return unless close_once
         @rx.close
       end
-
 
       private def broadcast_group_command(marker : UInt8, group : String) : Nil
         snapshot = @pipes_mutex.synchronize { @pipes.dup }
         snapshot.each { |p| send_group_command(p, marker, group) }
       end
 
-
       private def send_group_command(pipe : Pipe, marker : UInt8, group : String) : Nil
         cmd = marker == 0x01_u8 ? ZMTP::Command.join(group) : ZMTP::Command.leave(group)
         pipe.send_command(cmd)
       end
-
 
       private def drain(pipe : Pipe) : Nil
         while msg = pipe.rx.receive?
@@ -87,7 +76,6 @@ module OMQ
           end
         end
       end
-
 
       private def matches?(msg : Message) : Bool
         return false if msg.empty?

@@ -16,24 +16,23 @@ module OMQ
       def initialize(tx_capacity : Int32, rx_capacity : Int32)
         @tx = Channel(Message).new(tx_capacity)
         @rx = Channel(Message).new(rx_capacity)
-        @closed = false
+        @closed = Atomic(Bool).new(false)
       end
 
       def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
-        return if @closed
+        return if closed?
         @tx = Channel(Message).new(send_hwm)
         @rx = Channel(Message).new(recv_hwm)
       end
 
       def attach(pipe : Pipe) : Nil
-        return if @closed
+        return if closed?
         spawn send_pump(pipe)
         spawn recv_pump(pipe)
       end
 
       def close : Nil
-        return if @closed
-        @closed = true
+        return unless close_once
         @tx.close
         @rx.close
       end

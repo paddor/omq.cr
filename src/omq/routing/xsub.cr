@@ -1,6 +1,5 @@
 module OMQ
   module Routing
-
     # XSUB routing: broadcasts outbound messages to every connected peer
     # (so subscribe/cancel commands reach every upstream XPUB), and
     # fans in inbound messages with no local filter — the app sees every
@@ -11,17 +10,16 @@ module OMQ
       getter tx : Channel(Message)
       getter rx : Channel(Message)
 
-
       def initialize(capacity : Int32)
-        @tx          = Channel(Message).new(capacity)
-        @rx          = Channel(Message).new(capacity)
-        @pipes       = [] of Pipe
+        @tx = Channel(Message).new(capacity)
+        @rx = Channel(Message).new(capacity)
+        @pipes = [] of Pipe
         @pipes_mutex = Mutex.new
-        @closed      = false
+        @closed = Atomic(Bool).new(false)
       end
 
       def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
-        return if @closed
+        return if closed?
 
         @tx = Channel(Message).new(send_hwm)
         @rx = Channel(Message).new(recv_hwm)
@@ -30,14 +28,13 @@ module OMQ
       end
 
       def attach(pipe : Pipe) : Nil
-        return if @closed
+        return if closed?
         @pipes_mutex.synchronize { @pipes << pipe }
         spawn recv_pump(pipe)
       end
 
       def close : Nil
-        return if @closed
-        @closed = true
+        return unless close_once
         @tx.close
         @rx.close
       end

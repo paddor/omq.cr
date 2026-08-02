@@ -1,6 +1,5 @@
 module OMQ
   module Routing
-
     # XPUB routing: same fan-out + on_mute semantics as `Pub`, plus a
     # peer-rx fan-in. Subscribe/cancel events sent by XSUB peers arrive
     # as ZMTP 3.0 legacy data frames whose first byte is 0x01 (subscribe)
@@ -10,41 +9,38 @@ module OMQ
       getter tx : Channel(Message)
       getter rx : Channel(Message)
 
-
       record PeerSlot, pipe : Pipe, drop : DropQueue(Message)?
 
-
       def initialize(capacity : Int32, @conflate : Bool = false, @on_mute : Options::MuteStrategy = Options::MuteStrategy::Block)
-        @tx          = Channel(Message).new(capacity)
-        @rx          = Channel(Message).new(capacity)
-        @peer_slots  = [] of PeerSlot
+        @tx = Channel(Message).new(capacity)
+        @rx = Channel(Message).new(capacity)
+        @peer_slots = [] of PeerSlot
         @pipes_mutex = Mutex.new
-        @closed      = false
-        @peer_hwm    = capacity
+        @closed = Atomic(Bool).new(false)
+        @peer_hwm = capacity
       end
 
       def commit_capacity(send_hwm : Int32, recv_hwm : Int32, conflate : Bool, on_mute : Options::MuteStrategy) : Nil
-        return if @closed
+        return if closed?
 
         @conflate = conflate
-        @on_mute  = on_mute
+        @on_mute = on_mute
         @peer_hwm = send_hwm
-        @tx       = Channel(Message).new(send_hwm)
-        @rx       = Channel(Message).new(recv_hwm)
+        @tx = Channel(Message).new(send_hwm)
+        @rx = Channel(Message).new(recv_hwm)
 
         spawn dispatcher
       end
 
       def attach(pipe : Pipe) : Nil
-        return if @closed
+        return if closed?
         slot = build_slot(pipe)
         @pipes_mutex.synchronize { @peer_slots << slot }
         spawn recv_pump(pipe)
       end
 
       def close : Nil
-        return if @closed
-        @closed = true
+        return unless close_once
         @tx.close
         @rx.close
         @pipes_mutex.synchronize do

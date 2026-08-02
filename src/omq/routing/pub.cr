@@ -1,6 +1,5 @@
 module OMQ
   module Routing
-
     # PUB routing: fan-out to every connected peer.
     #
     # v0.1 does not yet negotiate SUBSCRIBE/CANCEL over the wire; every
@@ -12,44 +11,41 @@ module OMQ
     class Pub < Strategy
       getter tx : Channel(Message)
 
-
       # When on_mute is a drop strategy, each peer gets its own DropQueue
       # and a forwarder fiber draining into pipe.tx. In Block mode we
       # fan out to pipe.tx directly — the dispatcher blocks on any slow
       # peer, same as libzmq ZMQ_XPUB_NODROP.
       record PeerSlot, pipe : Pipe, drop : DropQueue(Message)?
 
-
       def initialize(capacity : Int32, @conflate : Bool = false, @on_mute : Options::MuteStrategy = Options::MuteStrategy::Block)
-        @tx          = Channel(Message).new(capacity)
-        @peer_slots  = [] of PeerSlot
+        @tx = Channel(Message).new(capacity)
+        @peer_slots = [] of PeerSlot
         @pipes_mutex = Mutex.new
-        @closed      = false
-        @peer_hwm    = capacity
+        @closed = Atomic(Bool).new(false)
+        @peer_hwm = capacity
       end
 
       # Called once on first bind/connect (via Socket's commit gate).
       # Installs the finalized @tx capacity and starts the dispatcher.
       def commit_capacity(send_hwm : Int32, recv_hwm : Int32, conflate : Bool, on_mute : Options::MuteStrategy) : Nil
-        return if @closed
+        return if closed?
 
         @conflate = conflate
-        @on_mute  = on_mute
+        @on_mute = on_mute
         @peer_hwm = send_hwm
-        @tx       = Channel(Message).new(send_hwm)
+        @tx = Channel(Message).new(send_hwm)
 
         spawn dispatcher
       end
 
       def attach(pipe : Pipe) : Nil
-        return if @closed
+        return if closed?
         slot = build_slot(pipe)
         @pipes_mutex.synchronize { @peer_slots << slot }
       end
 
       def close : Nil
-        return if @closed
-        @closed = true
+        return unless close_once
         @tx.close
         @pipes_mutex.synchronize do
           @peer_slots.each { |s| s.drop.try(&.close) }
@@ -110,7 +106,6 @@ module OMQ
             end
           end
         end
-
       end
     end
   end

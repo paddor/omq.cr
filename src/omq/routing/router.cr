@@ -17,18 +17,18 @@ module OMQ
         @rx = Channel(Message).new(rx_capacity)
         @pipes_by_id = {} of Bytes => Pipe
         @mutex = Mutex.new
-        @closed = false
+        @closed = Atomic(Bool).new(false)
       end
 
       def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
-        return if @closed
+        return if closed?
         @tx = Channel(Message).new(send_hwm)
         @rx = Channel(Message).new(recv_hwm)
         spawn dispatcher
       end
 
       def attach(pipe : Pipe) : Nil
-        return if @closed
+        return if closed?
         identity = pipe.peer_identity
         identity = Random::Secure.random_bytes(5) if identity.empty?
         @mutex.synchronize { @pipes_by_id[identity] = pipe }
@@ -36,8 +36,7 @@ module OMQ
       end
 
       def close : Nil
-        return if @closed
-        @closed = true
+        return unless close_once
         @tx.close
         @rx.close
       end
