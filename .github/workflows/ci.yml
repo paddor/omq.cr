@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         crystal:
-          - "1.20.0"   # minimum supported (matches shard.yml)
+          - "1.21.0"   # minimum supported (matches shard.yml)
           - latest     # latest stable release
 
     steps:

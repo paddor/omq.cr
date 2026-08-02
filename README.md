@@ -1,13 +1,13 @@
 # ØMQ — ZeroMQ for Crystal, no C required
 
 [![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](LICENSE)
-[![Crystal](https://img.shields.io/badge/Crystal-%3E%3D%201.20-000000?logo=crystal&logoColor=white)](https://crystal-lang.org)
+[![Crystal](https://img.shields.io/badge/Crystal-%3E%3D%201.21-000000?logo=crystal&logoColor=white)](https://crystal-lang.org)
 
 > **17.8M msg/s** inproc | **717k msg/s** ipc | **285k msg/s** tcp
 >
 > **0.5 µs** inproc round-trip | **9.4 µs** ipc | **12 µs** tcp
 >
-> Crystal 1.20 on a Linux VM, 128-byte payloads — see [`bench/`](bench/) for
+> Crystal 1.21 on a Linux VM, 128-byte payloads — see [`bench/`](bench/) for
 > the full sweep
 
 Add `omq` to your `shard.yml` and you're done. No libzmq, no FFI, no system
@@ -34,8 +34,9 @@ loop.
   fiber scheduler is the "context"
 - **Every standard socket type** — REQ/REP, PUB/SUB, XPUB/XSUB, PUSH/PULL,
   DEALER/ROUTER, PAIR
-- **Every transport** — `tcp://`, `ipc://` (Unix domain sockets, abstract
-  namespace via leading `@`), `inproc://` (in-process channel pairs)
+- **Every transport** — `tcp://`, `lz4+tcp://`, `ipc://` (Unix domain
+  sockets, abstract namespace via leading `@`), `inproc://` (in-process
+  channel pairs)
 - **Wire-compatible** — interoperates with libzmq, pyzmq, CZMQ, JeroMQ,
   and the Ruby `omq` gem over TCP and IPC
 - **Bind/connect order doesn't matter** — connect before bind, bind before
@@ -51,7 +52,7 @@ dependencies:
     github: paddor/omq.cr
 ```
 
-Then `shards install`. Crystal ≥ 1.20 is required.
+Then `shards install`. Crystal ≥ 1.21 is required.
 
 ## Quick start
 
@@ -115,6 +116,30 @@ push.send("hello over the network")
 pp pull.receive
 ```
 
+### LZ4 TCP
+
+Use `lz4+tcp://` when payloads have repeated structure and bandwidth
+matters. Handshake and ZMTP commands stay raw. Data frames get a small
+LZ4 envelope and remain wire-compatible with Ruby `omq-lz4`.
+
+```crystal
+pull = OMQ::PULL.bind("lz4+tcp://127.0.0.1:0")
+push = OMQ::PUSH.connect("lz4+tcp://127.0.0.1:#{pull.port}")
+
+push.send("hello, compressed world")
+pp pull.receive
+```
+
+Send-side dictionaries are supported. They are shipped once per direction
+on each connection. `auto_dict: true` trains from early outgoing messages.
+
+```crystal
+dict = File.read("schema.dict").to_slice
+push.connect("lz4+tcp://127.0.0.1:5555", dict: dict)
+
+push.connect("lz4+tcp://127.0.0.1:5556", auto_dict: true)
+```
+
 ## Socket types
 
 All sockets are fiber-safe. Default HWM is 1000 messages per socket.
@@ -158,8 +183,10 @@ Readable sockets also expose queue-style `dequeue`, `pop`, `wait`, and
 | `read_timeout` / `write_timeout` | `nil` | Raise `IO::TimeoutError` after this span |
 | `reconnect_interval` | `100.milliseconds` | Fixed span, or `Range(Time::Span, Time::Span)` for exponential backoff |
 | `heartbeat_interval` / `heartbeat_ttl` / `heartbeat_timeout` | `nil` | ZMTP PING/PONG keepalive + silent-peer watchdog |
-| `max_message_size` | `nil` | Drop the connection if a frame exceeds this many bytes |
+| `max_message_size` | `nil` | Drop the connection if a frame exceeds this many bytes; for `lz4+tcp://`, this applies to total decompressed message size |
 | `sndbuf` / `rcvbuf` | `nil` | Kernel socket buffer sizes (TCP/IPC only) |
+| `dict` / `lz4_dict` | `nil` | Send-side LZ4 dictionary for `lz4+tcp://`; 1-8192 bytes |
+| `auto_dict` | `nil` | Enable send-side automatic LZ4 dictionary training for `lz4+tcp://`; `true` uses 2 KiB capacity and 100-message trigger |
 | `conflate` | `false` | PUB only: keep only the latest message under pressure |
 | `on_mute` | `:block`; PUB/XPUB use `:drop_newest` | `:block`, `:drop_newest`, `:drop_oldest` |
 
@@ -183,7 +210,7 @@ comparison.
 
 ## Status
 
-Pre-1.0. All 12 standard socket types work, inproc/ipc/tcp all work,
+Pre-1.0. All 12 standard socket types work, inproc/ipc/tcp/lz4+tcp all work,
 heartbeat/linger/reconnect/HWM/on_mute/conflate/max_message_size/sndbuf/rcvbuf
 are wired through. Draft socket types (CLIENT/SERVER, RADIO/DISH,
 SCATTER/GATHER, PEER, CHANNEL), CURVE encryption (opt-in via `require

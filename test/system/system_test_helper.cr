@@ -11,6 +11,7 @@ module OMQ::SystemTestHelper
   # Cached ruby path (nil = `ruby` can't load the `omq` gem).
   @@ruby_bin : String? = nil
   @@probed = false
+  @@ruby_features = {} of String => Bool
 
   def self.ruby_bin : String?
     return @@ruby_bin if @@probed
@@ -22,6 +23,17 @@ module OMQ::SystemTestHelper
     end
   rescue
     nil
+  end
+
+  def self.ruby_can_require?(feature : String) : Bool
+    return @@ruby_features[feature] if @@ruby_features.has_key?(feature)
+    ruby = ruby_bin
+    return @@ruby_features[feature] = false unless ruby
+
+    status = Process.run(ruby, ["-r", feature, "-e", "exit 0"], output: Process::Redirect::Close, error: Process::Redirect::Close)
+    @@ruby_features[feature] = status.success?
+  rescue
+    @@ruby_features[feature] = false
   end
 
   # Spawn a Ruby script and read the `ENDPOINT=<uri>` it prints on its

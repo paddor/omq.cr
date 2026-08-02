@@ -6,12 +6,17 @@ description: |
   Buffered channels for inproc, evented IO for TCP/IPC. Interoperable
   with libzmq, pyzmq, CZMQ, and the Ruby omq gem.
 
-crystal: ">= 1.20.0"
+crystal: ">= 1.21.0"
 
 license: ISC
 
 authors:
   - Patrik Wenger <paddor@gmail.com>
+
+dependencies:
+  flint:
+    github: paddor/flint
+    version: "~> 0.1.0"
 
 development_dependencies:
   minitest:

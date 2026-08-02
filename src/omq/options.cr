@@ -42,6 +42,9 @@ module OMQ
     property sndbuf : Int32? = nil
     property rcvbuf : Int32? = nil
 
+    @lz4_dict : Bytes? = nil
+    @lz4_auto_dict : Transport::Lz4Tcp::AutoDict? = nil
+
     property on_mute : MuteStrategy = MuteStrategy::Block
 
     property mechanism : ZMTP::Mechanism = ZMTP::Mechanism::Null.new
@@ -113,6 +116,81 @@ module OMQ
       @identity = val.dup
     end
 
+    def lz4_dict : Bytes?
+      @lz4_dict.try(&.dup)
+    end
+
+    def dict : Bytes?
+      lz4_dict
+    end
+
+    def lz4_dict=(val : String)
+      self.lz4_dict = val.to_slice
+    end
+
+    def lz4_dict=(val : Bytes)
+      Transport::Lz4Tcp.validate_dict_size!(val.size)
+      @lz4_dict = val.dup
+      validate_lz4_dictionary_modes!
+    end
+
+    def lz4_dict=(val : Nil)
+      @lz4_dict = nil
+    end
+
+    def dict=(val : String)
+      self.lz4_dict = val
+    end
+
+    def dict=(val : Bytes)
+      self.lz4_dict = val
+    end
+
+    def dict=(val : Nil)
+      self.lz4_dict = val
+    end
+
+    def lz4_auto_dict : Transport::Lz4Tcp::AutoDict?
+      @lz4_auto_dict
+    end
+
+    def auto_dict : Transport::Lz4Tcp::AutoDict?
+      @lz4_auto_dict
+    end
+
+    def lz4_auto_dict=(val)
+      self.auto_dict = val
+    end
+
+    def auto_dict=(val : Bool)
+      @lz4_auto_dict = val ? Transport::Lz4Tcp::AutoDict.new : nil
+      validate_lz4_dictionary_modes!
+    end
+
+    def auto_dict=(val : Transport::Lz4Tcp::AutoDict)
+      @lz4_auto_dict = val
+      validate_lz4_dictionary_modes!
+    end
+
+    def auto_dict=(val : NamedTuple(capacity: Int32, trigger: Int32))
+      @lz4_auto_dict = Transport::Lz4Tcp::AutoDict.new(capacity: val[:capacity], trigger: val[:trigger])
+      validate_lz4_dictionary_modes!
+    end
+
+    def auto_dict=(val : NamedTuple(capacity: Int32))
+      @lz4_auto_dict = Transport::Lz4Tcp::AutoDict.new(capacity: val[:capacity])
+      validate_lz4_dictionary_modes!
+    end
+
+    def auto_dict=(val : NamedTuple(trigger: Int32))
+      @lz4_auto_dict = Transport::Lz4Tcp::AutoDict.new(trigger: val[:trigger])
+      validate_lz4_dictionary_modes!
+    end
+
+    def auto_dict=(val : Nil)
+      @lz4_auto_dict = nil
+    end
+
     # Symbol → MuteStrategy shim so `on_mute = :drop_newest` works, the
     # idiomatic Ruby-OMQ spelling.
     def on_mute=(val : Symbol)
@@ -121,6 +199,10 @@ module OMQ
 
     private def validate_hwm(val : Int32, name : String) : Nil
       raise ArgumentError.new("#{name} must be >= 0 (got #{val})") if val < 0
+    end
+
+    private def validate_lz4_dictionary_modes! : Nil
+      raise ArgumentError.new("cannot combine auto_dict: and dict:") if @lz4_dict && @lz4_auto_dict
     end
   end
 end

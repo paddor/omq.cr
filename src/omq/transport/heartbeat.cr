@@ -13,7 +13,7 @@ module OMQ
     # - IO errors while sending are treated as "peer gone," close the
     #   connection, and exit the loop.
     def heartbeat_pump(
-      zmtp : ZMTP::Connection,
+      zmtp,
       *,
       interval : Time::Span,
       ttl : Time::Span,

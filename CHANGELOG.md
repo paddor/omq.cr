@@ -6,7 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-03
+
 ### Added
+
+- Initial public shard release for pure-Crystal OMQ.
+- `lz4+tcp://` transport backed by Flint 0.1.0. Handshake and ZMTP
+  commands remain raw; data message parts use the Ruby `omq-lz4`
+  envelope format.
+- Send-side LZ4 dictionaries with `dict:` / `lz4_dict:` and optional
+  automatic dictionary training with `auto_dict:`.
+- Unit and Ruby interop coverage for LZ4 codec envelopes, static
+  dictionaries, automatic dictionaries, max-message-size enforcement,
+  and plain TCP mismatch handling.
 
 - Initial pure-Crystal port of the Ruby `omq` gem (ZMTP 3.1, no FFI)
 - Socket types: `PAIR`, `PUSH` / `PULL`, `REQ` / `REP`, `PUB` / `SUB`,
