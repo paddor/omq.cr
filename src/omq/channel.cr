@@ -34,6 +34,23 @@ module OMQ
       send_frames([msg])
     end
 
+    def try_send(msg : String) : Bool
+      try_send_frames([msg.to_slice])
+    end
+
+    def try_send(msg : Bytes) : Bool
+      try_send_frames([msg])
+    end
+
+    def try_send(msg : Array(String)) : Bool
+      try_send(msg.map(&.to_slice))
+    end
+
+    def try_send(msg : Array(Bytes)) : Bool
+      raise ArgumentError.new("CHANNEL messages must have exactly one frame") unless msg.size == 1
+      try_send_frames(msg)
+    end
+
     def <<(msg) : self
       send(msg)
     end
@@ -49,6 +66,16 @@ module OMQ
       pipe = await_pipe?
       return nil unless pipe
       pipe.rx.receive?
+    end
+
+    def try_receive : Message?
+      pipe = active_pipe
+      return nil unless pipe
+      channel_try_receive(pipe.rx)
+    end
+
+    def try_recv : Message?
+      try_receive
     end
 
     protected def socket_type : String
@@ -90,6 +117,12 @@ module OMQ
       self
     rescue ::Channel::ClosedError
       raise ClosedError.new("socket closed while sending")
+    end
+
+    private def try_send_frames(frames : Message) : Bool
+      pipe = active_pipe
+      return false unless pipe
+      channel_try_send(pipe.tx, frames)
     end
 
     private def await_pipe(timeout span : Time::Span? = nil) : Pipe

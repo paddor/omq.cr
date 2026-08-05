@@ -16,6 +16,8 @@ module OMQ
         @tx = Channel(Message).new(capacity)
         @rx = Channel(Message).new(capacity)
         @subscriber_joined = Channel(Pipe).new(128)
+        @subscription_count = Atomic(Int64).new(0)
+        @subscription_signal = Channel(Nil).new(1)
         @peer_slots = [] of PeerSlot
         @pipes_mutex = Mutex.new
         @subscriptions = {} of Pipe => Array(Bytes)
@@ -52,9 +54,18 @@ module OMQ
         @tx.close
         @rx.close
         @subscriber_joined.close
+        @subscription_signal.close
         @pipes_mutex.synchronize do
           @peer_slots.each { |s| s.drop.try(&.close) }
         end
+      end
+
+      def subscription_count : Int64
+        @subscription_count.get
+      end
+
+      def wait_subscribed(min_subscriptions : Int, timeout : Time::Span) : Int64
+        wait_for_subscription_count(min_subscriptions, timeout)
       end
 
       private def build_slot(pipe : Pipe) : PeerSlot
@@ -129,6 +140,8 @@ module OMQ
           return if prefixes.any? { |p| p == prefix }
           prefixes << prefix.dup
         end
+        @subscription_count.add(1)
+        signal_subscription
         notify_subscriber_joined(pipe)
       end
 
@@ -170,6 +183,32 @@ module OMQ
         prefix.copy_to(frame + 1) if prefix.size > 0
         @rx.send(Message{frame})
       rescue Channel::ClosedError
+      end
+
+      private def signal_subscription : Nil
+        select
+        when @subscription_signal.send(nil)
+        else
+        end
+      rescue Channel::ClosedError
+      end
+
+      private def wait_for_subscription_count(min_subscriptions : Int, timeout : Time::Span) : Int64
+        raise ArgumentError.new("min_subscriptions must be >= 0") if min_subscriptions < 0
+        deadline = Time.instant + timeout
+        loop do
+          count = subscription_count
+          return count if count >= min_subscriptions
+          raise ClosedError.new("socket closed while waiting for subscriptions") if closed?
+
+          remaining = deadline - Time.instant
+          raise IO::TimeoutError.new("wait_subscribed timed out after #{timeout}") unless remaining.positive?
+          select
+          when @subscription_signal.receive?
+          when timeout(remaining)
+            raise IO::TimeoutError.new("wait_subscribed timed out after #{timeout}")
+          end
+        end
       end
 
       private def dispatcher : Nil

@@ -16,6 +16,9 @@ module OMQ
     # via the connector's options.identity for inproc). Empty means the
     # peer didn't advertise one; ROUTER will substitute a random ID.
     property peer_identity : Bytes = Bytes.empty
+    property peer_address : String? = nil
+    # Connectionless RADIO/UDP sends every datagram; DISH filters locally.
+    property? radio_broadcast_all : Bool = false
 
     # ZMTP minor version the peer advertised (0 = 3.0, 1 = 3.1). Inproc
     # pipes don't do a wire handshake and default to 3.1 semantics.
@@ -23,6 +26,8 @@ module OMQ
     property peer_zmtp_minor : UInt8 = ZMTP::MINOR_VERSION
 
     getter close_signal : Channel(Nil)
+    @disconnect_reason : DisconnectReason? = nil
+    @disconnect_reason_mutex = Mutex.new
 
     # Out-of-band channel for pre-encoded ZMTP commands (SUBSCRIBE/CANCEL)
     # on TCP/IPC pipes. Inproc pipes parse those bytes into command events
@@ -39,6 +44,18 @@ module OMQ
       @commands_out : Channel(ZMTP::CommandEvent)? = nil,
       @close_signal : Channel(Nil) = Channel(Nil).new,
     )
+    end
+
+    def disconnect_reason : DisconnectReason?
+      @disconnect_reason_mutex.synchronize { @disconnect_reason }
+    end
+
+    def disconnect_reason=(reason : DisconnectReason?) : DisconnectReason?
+      @disconnect_reason_mutex.synchronize { @disconnect_reason = reason }
+    end
+
+    def mark_disconnect(reason : DisconnectReason) : Nil
+      @disconnect_reason_mutex.synchronize { @disconnect_reason ||= reason }
     end
 
     # Best-effort send of a ZMTP command payload upstream.

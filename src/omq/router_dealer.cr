@@ -4,6 +4,8 @@ module OMQ
   class DEALER < Socket
     include QueueReadable
     include QueueWritable
+    include TryReadable
+    include MultipartTryWritable
 
     @@default_action = :connect
 
@@ -17,7 +19,7 @@ module OMQ
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity, @options.conflate)
     end
 
     def send(msg : String) : self
@@ -76,6 +78,7 @@ module OMQ
   class ROUTER < Socket
     include QueueReadable
     include QueueWritable
+    include TryReadable
 
     @@default_action = :bind
 
@@ -100,6 +103,14 @@ module OMQ
       send_frames(msg.map(&.to_slice))
     end
 
+    def try_send(msg : Array(Bytes)) : Bool
+      try_send_frames(msg)
+    end
+
+    def try_send(msg : Array(String)) : Bool
+      try_send_frames(msg.map(&.to_slice))
+    end
+
     def send_to(identity : String, msg) : self
       send_to(identity.to_slice, msg)
     end
@@ -118,6 +129,26 @@ module OMQ
 
     def send_to(identity : Bytes, msg : Array(Bytes)) : self
       send_to_frames(identity, msg)
+    end
+
+    def try_send_to(identity : String, msg) : Bool
+      try_send_to(identity.to_slice, msg)
+    end
+
+    def try_send_to(identity : Bytes, msg : String) : Bool
+      try_send_to_frames(identity, [msg.to_slice])
+    end
+
+    def try_send_to(identity : Bytes, msg : Bytes) : Bool
+      try_send_to_frames(identity, [msg])
+    end
+
+    def try_send_to(identity : Bytes, msg : Array(String)) : Bool
+      try_send_to_frames(identity, msg.map(&.to_slice))
+    end
+
+    def try_send_to(identity : Bytes, msg : Array(Bytes)) : Bool
+      try_send_to_frames(identity, msg)
     end
 
     def <<(msg) : self
@@ -157,12 +188,29 @@ module OMQ
       raise ClosedError.new("socket closed while sending")
     end
 
+    private def try_send_frames(frames : Message) : Bool
+      raise ArgumentError.new("ROUTER messages need at least a routing identity frame") if frames.empty?
+      if @strategy.route?(frames[0]).nil?
+        raise Error.new("no route to identity #{frames[0].inspect}") if @options.router_mandatory?
+        return true
+      end
+      channel_try_send(@strategy.tx, frames)
+    end
+
     private def send_to_frames(identity : Bytes, body : Message) : self
       frames = Message.new(body.size + 2)
       frames << identity.dup
       frames << Bytes.empty
       body.each { |frame| frames << frame }
       send_frames(frames)
+    end
+
+    private def try_send_to_frames(identity : Bytes, body : Message) : Bool
+      frames = Message.new(body.size + 2)
+      frames << identity.dup
+      frames << Bytes.empty
+      body.each { |frame| frames << frame }
+      try_send_frames(frames)
     end
   end
 end

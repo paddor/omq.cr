@@ -32,7 +32,13 @@ module OMQ::ZMTP
     # Drive the greeting exchange and mechanism handshake. Raises
     # `UnsupportedVersion` for ZMTP 2.x peers and `ProtocolError` for
     # bad signatures / mechanism mismatches.
-    def handshake(*, local_socket_type : String, local_identity : Bytes, as_server : Bool) : Nil
+    def handshake(
+      *,
+      local_socket_type : String,
+      local_identity : Bytes,
+      as_server : Bool,
+      peer_address : String? = nil,
+    ) : Nil
       Greeting.new(@mechanism.name, as_server: as_server).to_io(@io)
       flush
 
@@ -49,6 +55,7 @@ module OMQ::ZMTP
         local_socket_type: local_socket_type,
         local_identity: local_identity,
         as_server: as_server,
+        peer_address: peer_address,
       )
     end
 

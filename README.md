@@ -34,9 +34,11 @@ loop.
   fiber scheduler is the "context"
 - **Every standard socket type** — REQ/REP, PUB/SUB, XPUB/XSUB, PUSH/PULL,
   DEALER/ROUTER, PAIR
-- **Every transport** — `tcp://`, `lz4+tcp://`, `ipc://` (Unix domain
+- **Every transport** — `tcp://`, `udp://`, `lz4+tcp://`, `ipc://` (Unix domain
   sockets, abstract namespace via leading `@`), `inproc://` (in-process
   channel pairs)
+- **Security mechanisms** — NULL by default, PLAIN username/password auth,
+  CURVE encryption via `require "omq/curve"`
 - **Wire-compatible** — interoperates with libzmq, pyzmq, CZMQ, JeroMQ,
   and the Ruby `omq` gem over TCP and IPC
 - **Bind/connect order doesn't matter** — connect before bind, bind before
@@ -152,6 +154,7 @@ Classes live under `OMQ::`.
 | **XPUB** / **XSUB** | Fan-out / broadcast | Subscribe events / no filter | DropNewest by default on XPUB; configurable |
 | **PUSH** / **PULL** | Work-stealing to workers | Fair-queue | Block |
 | **DEALER** / **ROUTER** | Work-stealing / identity-route | Fair-queue | Block |
+| **STREAM** | Identity-route raw TCP | Identity-prefixed raw TCP | Block |
 | **PAIR** | Exclusive 1-to-1 | Exclusive 1-to-1 | Block |
 
 Set options between `.new` and the first `.bind`/`.connect`:
@@ -165,6 +168,20 @@ sub.connect("tcp://server:5555")
 
 Readable sockets also expose queue-style `dequeue`, `pop`, `wait`, and
 `each`; writable sockets expose `enqueue` and `push`.
+
+Use `try_receive` / `try_recv` and `try_send` for nonblocking polling.
+They return `nil` or `false` instead of waiting for data or HWM space.
+
+`OMQ.proxy(frontend, backend)` forwards between sockets. Use
+`OMQ.proxy_steerable(frontend, backend, control)` for `PAUSE`, `RESUME`,
+`TERMINATE`, and `KILL` control commands; an optional capture socket receives
+best-effort copies.
+
+`socket.connections` returns live `ConnectionInfo` snapshots. Monitor events
+for accepted, connected, and disconnected pipes include the same info.
+
+`socket.wait_connected(min_peers, timeout)` waits for data-plane-ready peers.
+PUB/XPUB also expose `wait_subscribed(min_subscriptions, timeout)`.
 
 ### Endpoint prefix convention
 
@@ -183,11 +200,13 @@ Readable sockets also expose queue-style `dequeue`, `pop`, `wait`, and
 | `read_timeout` / `write_timeout` | `nil` | Raise `IO::TimeoutError` after this span |
 | `reconnect_interval` | `100.milliseconds` | Fixed span, or `Range(Time::Span, Time::Span)` for exponential backoff |
 | `heartbeat_interval` / `heartbeat_ttl` / `heartbeat_timeout` | `nil` | ZMTP PING/PONG keepalive + silent-peer watchdog |
+| `handshake_timeout` | `30.seconds` | Max time for a ZMTP handshake before the transport is closed |
+| `max_pending_handshakes` | `1024` | Max accepted TCP/IPC peers allowed to sit in handshake state |
 | `max_message_size` | `nil` | Drop the connection if a frame exceeds this many bytes; for `lz4+tcp://`, this applies to total decompressed message size |
 | `sndbuf` / `rcvbuf` | `nil` | Kernel socket buffer sizes (TCP/IPC only) |
 | `dict` / `lz4_dict` | `nil` | Send-side LZ4 dictionary for `lz4+tcp://`; 1-8192 bytes |
 | `auto_dict` | `nil` | Enable send-side automatic LZ4 dictionary training for `lz4+tcp://`; `true` uses 2 KiB capacity and 100-message trigger |
-| `conflate` | `false` | PUB only: keep only the latest message under pressure |
+| `conflate` | `false` | Keep only the latest queued message where message order carries no envelope state |
 | `on_mute` | `:block`; PUB/XPUB use `:drop_newest` | `:block`, `:drop_newest`, `:drop_oldest` |
 
 ## Benchmarks
@@ -210,12 +229,27 @@ comparison.
 
 ## Status
 
-Pre-1.0. All 12 standard socket types work, inproc/ipc/tcp/lz4+tcp all work,
-heartbeat/linger/reconnect/HWM/on_mute/conflate/max_message_size/sndbuf/rcvbuf
-are wired through. Draft socket types (CLIENT/SERVER, RADIO/DISH,
-SCATTER/GATHER, PEER, CHANNEL), CURVE encryption (opt-in via `require
-"omq/curve"`), and the monitor-event API all work — see
+Pre-1.0. All 12 standard socket types work, inproc/ipc/tcp/udp/lz4+tcp all
+work, heartbeat/linger/reconnect/HWM/on_mute/conflate/max_message_size/sndbuf/rcvbuf
+are wired through. PLAIN auth, draft socket types (CLIENT/SERVER,
+RADIO/DISH, SCATTER/GATHER, PEER, CHANNEL, STREAM), CURVE encryption (opt-in via
+`require "omq/curve"`), and the monitor-event API all work — see
 [`CHANGELOG.md`](CHANGELOG.md).
+
+## PLAIN authentication
+
+PLAIN authenticates a username/password during the ZMTP handshake. Traffic
+after the handshake is not encrypted.
+
+```crystal
+pull = OMQ::PULL.new
+pull.mechanism = OMQ::ZMTP::Mechanism::Plain.server({"alice" => "secret"})
+pull.bind("tcp://127.0.0.1:5555")
+
+push = OMQ::PUSH.new
+push.mechanism = OMQ::ZMTP::Mechanism::Plain.client("alice", "secret")
+push.connect("tcp://127.0.0.1:5555")
+```
 
 ## CURVE encryption
 

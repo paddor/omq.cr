@@ -13,16 +13,18 @@ module OMQ
       def initialize(capacity : Int32)
         @tx = Channel(Message).new(capacity)
         @rx = Channel(Message).new(capacity)
+        @conflate_recv = false
         @pipes = [] of Pipe
         @pipes_mutex = Mutex.new
         @closed = Atomic(Bool).new(false)
       end
 
-      def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
+      def commit_capacity(send_hwm : Int32, recv_hwm : Int32, conflate_recv : Bool = false) : Nil
         return if closed?
 
         @tx = Channel(Message).new(send_hwm)
-        @rx = Channel(Message).new(recv_hwm)
+        @conflate_recv = conflate_recv
+        @rx = Channel(Message).new(conflate_recv ? 1 : recv_hwm)
 
         spawn dispatcher
       end
@@ -41,11 +43,7 @@ module OMQ
 
       private def recv_pump(pipe : Pipe) : Nil
         while msg = pipe.rx.receive?
-          begin
-            @rx.send(msg)
-          rescue Channel::ClosedError
-            break
-          end
+          break unless deliver_receive(@rx, msg, @conflate_recv)
         end
       end
 

@@ -16,6 +16,8 @@ describe "socket constructor options" do
     push.heartbeat_interval = 400.milliseconds
     push.heartbeat_ttl = 500.milliseconds
     push.heartbeat_timeout = 600.milliseconds
+    push.handshake_timeout = 900.milliseconds
+    push.max_pending_handshakes = 12
     push.max_message_size = 42_i64
     push.conflate = true
     push.sndbuf = 1024
@@ -34,6 +36,8 @@ describe "socket constructor options" do
     assert_equal 400.milliseconds, push.heartbeat_interval
     assert_equal 500.milliseconds, push.heartbeat_ttl
     assert_equal 600.milliseconds, push.heartbeat_timeout
+    assert_equal 900.milliseconds, push.handshake_timeout
+    assert_equal 12, push.max_pending_handshakes
     assert_equal 42_i64, push.max_message_size
     assert push.conflate
     assert_equal 1024, push.sndbuf
@@ -76,6 +80,17 @@ describe "socket constructor options" do
     push.try(&.close)
   end
 
+  it "rejects invalid handshake and identity options" do
+    push = OMQ::PUSH.new
+
+    assert_raises(ArgumentError) { push.max_pending_handshakes = -1 }
+    assert_raises(ArgumentError) { OMQ::PUSH.new(max_pending_handshakes: -1) }
+    assert_raises(ArgumentError) { push.identity = "x" * 256 }
+    assert_raises(ArgumentError) { OMQ::PUSH.new(identity: Bytes.new(256, 1_u8)) }
+  ensure
+    push.try(&.close)
+  end
+
   it "treats explicit nil HWM as unbounded" do
     push = OMQ::PUSH.new(send_hwm: nil, recv_hwm: nil)
 
@@ -102,12 +117,20 @@ describe "socket constructor options" do
   end
 
   it "applies core options from .new keyword arguments" do
-    push = OMQ::PUSH.new(send_hwm: 7, write_timeout: 25.milliseconds, linger: 0.seconds)
+    push = OMQ::PUSH.new(
+      send_hwm: 7,
+      write_timeout: 25.milliseconds,
+      linger: 0.seconds,
+      handshake_timeout: nil,
+      max_pending_handshakes: 2,
+    )
 
     assert_equal 7, push.send_hwm
     assert_equal 25.milliseconds, push.write_timeout
     assert_equal 25.milliseconds, push.send_timeout
     assert_equal 0.seconds, push.linger
+    assert_nil push.handshake_timeout
+    assert_equal 2, push.max_pending_handshakes
   ensure
     push.try(&.close)
   end

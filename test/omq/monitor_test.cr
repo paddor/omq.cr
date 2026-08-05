@@ -45,6 +45,57 @@ describe "Socket#monitor" do
     end
   end
 
+  it "reports handshake success on the TCP connecting side" do
+    OMQ::TestHelper.with_timeout(3.seconds) do
+      pull = OMQ::PULL.bind("tcp://127.0.0.1:0")
+      port = pull.port.not_nil!
+
+      push = OMQ::PUSH.new
+      events = push.monitor
+      push.connect("tcp://127.0.0.1:#{port}")
+
+      connected = OMQ::TestHelper.wait_monitor_event(events, OMQ::MonitorEvent::Kind::Connected)
+      succeeded = OMQ::TestHelper.wait_monitor_event(events, OMQ::MonitorEvent::Kind::HandshakeSucceeded)
+
+      assert_equal connected.connection.not_nil!.id, succeeded.connection.not_nil!.id
+      assert succeeded.peer_address.not_nil!.includes?("127.0.0.1:#{port}")
+
+      push.close
+      pull.close
+    end
+  end
+
+  it "exposes connection snapshots and attaches them to monitor events" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      router = OMQ::ROUTER.new
+      events = router.monitor
+      router.bind("inproc://mon-conn-info")
+      dealer = OMQ::DEALER.connect("inproc://mon-conn-info", identity: "worker-1")
+
+      events.receive # Listening
+      accepted = events.receive
+
+      info = accepted.connection.not_nil!
+      assert_equal OMQ::MonitorEvent::Kind::Accepted, accepted.kind
+      assert_equal "inproc://mon-conn-info", info.endpoint
+      assert_equal "ROUTER", info.socket_type
+      assert_equal "worker-1", String.new(info.peer_identity)
+      assert_equal OMQ::ZMTP::MINOR_VERSION, info.peer_zmtp_minor
+      assert_nil info.peer_address
+      refute_nil router.connection_info(info.id)
+      assert_equal [info.id], router.connections.map(&.id)
+
+      dealer.close
+      disconnected = events.receive
+      assert_equal OMQ::MonitorEvent::Kind::Disconnected, disconnected.kind
+      assert_equal OMQ::DisconnectReason::PeerClosed, disconnected.reason
+      assert_equal info.id, disconnected.connection.not_nil!.id
+      assert_nil router.connection_info(info.id)
+
+      router.close
+    end
+  end
+
   it "emits Disconnected on the inproc bind side when peer closes" do
     OMQ::TestHelper.with_timeout(2.seconds) do
       pull = OMQ::PULL.new
@@ -59,6 +110,7 @@ describe "Socket#monitor" do
       disconnected = events.receive
 
       assert_equal OMQ::MonitorEvent::Kind::Disconnected, disconnected.kind
+      assert_equal OMQ::DisconnectReason::PeerClosed, disconnected.reason
       assert_equal "inproc://mon-inproc-disconnect", disconnected.endpoint
       assert_equal 0, pull.peer_count
 
@@ -81,11 +133,18 @@ describe "Socket#monitor" do
       assert_equal "tcp://127.0.0.1:#{port}", listening.endpoint
       assert_equal OMQ::MonitorEvent::Kind::Accepted, accepted.kind
       assert_equal "tcp://127.0.0.1:#{port}", accepted.endpoint
+      assert accepted.peer_address.not_nil!.includes?("127.0.0.1")
+
+      succeeded = events.receive
+      assert_equal OMQ::MonitorEvent::Kind::HandshakeSucceeded, succeeded.kind
+      assert_equal accepted.connection.not_nil!.id, succeeded.connection.not_nil!.id
+      assert succeeded.connection.not_nil!.peer_address.not_nil!.includes?("127.0.0.1")
 
       push.close
-      disconnected = events.receive
+      disconnected = OMQ::TestHelper.wait_monitor_event(events, OMQ::MonitorEvent::Kind::Disconnected)
 
       assert_equal OMQ::MonitorEvent::Kind::Disconnected, disconnected.kind
+      assert_equal OMQ::DisconnectReason::PeerClosed, disconnected.reason
       assert_equal "tcp://127.0.0.1:#{port}", disconnected.endpoint
       assert_equal 0, pull.peer_count
 
@@ -105,6 +164,28 @@ describe "Socket#monitor" do
       refute_nil delayed.error
 
       s.close
+    end
+  end
+
+  it "reports Handover when identity routing replaces a peer" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      router = OMQ::ROUTER.new
+      events = router.monitor
+      router.bind("inproc://mon-handover")
+
+      old_dealer = OMQ::DEALER.connect("inproc://mon-handover", identity: "same")
+      OMQ::TestHelper.wait_monitor_event(events, OMQ::MonitorEvent::Kind::Accepted)
+
+      new_dealer = OMQ::DEALER.connect("inproc://mon-handover", identity: "same")
+      disconnected = OMQ::TestHelper.wait_monitor_event(events, OMQ::MonitorEvent::Kind::Disconnected)
+
+      assert_equal OMQ::DisconnectReason::Handover, disconnected.reason
+      assert_equal "same", String.new(disconnected.connection.not_nil!.peer_identity)
+      assert_equal 1, router.peer_count
+
+      old_dealer.close
+      new_dealer.close
+      router.close
     end
   end
 

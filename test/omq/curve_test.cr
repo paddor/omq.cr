@@ -119,4 +119,46 @@ describe "CURVE encryption" do
       spawn push.close
     end
   end
+
+  it "passes client key, identity, and TCP address to peer authenticator" do
+    server_pub, server_sec = generate_keypair
+    client_pub, client_sec = generate_keypair
+    seen = Channel(OMQ::ZMTP::Mechanism::Curve::PeerInfo).new(1)
+
+    OMQ::TestHelper.with_timeout(3.seconds) do
+      authenticator = ->(peer : OMQ::ZMTP::Mechanism::Curve::PeerInfo) {
+        seen.send(peer)
+        peer.public_key == client_pub
+      }
+
+      pull = OMQ::PULL.new
+      pull.mechanism = OMQ::ZMTP::Mechanism::Curve.server(
+        public_key: server_pub,
+        secret_key: server_sec,
+        authenticator: authenticator,
+      )
+      pull.bind("tcp://127.0.0.1:0")
+      port = pull.port.not_nil!
+
+      push = OMQ::PUSH.new
+      push.identity = "curve-client"
+      push.mechanism = OMQ::ZMTP::Mechanism::Curve.client(
+        server_key: server_pub,
+        public_key: client_pub,
+        secret_key: client_sec,
+      )
+      push.connect("tcp://127.0.0.1:#{port}")
+
+      push.send("hello")
+      assert_equal "hello", String.new(pull.receive[0])
+
+      peer = seen.receive
+      assert_equal client_pub, peer.public_key
+      assert_equal "curve-client", String.new(peer.identity.not_nil!)
+      assert peer.peer_address.not_nil!.includes?("127.0.0.1")
+
+      push.close
+      pull.close
+    end
+  end
 end

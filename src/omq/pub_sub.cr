@@ -2,6 +2,7 @@ module OMQ
   # PUB: write-only, fans out every message to every connected SUB peer.
   class PUB < Socket
     include QueueWritable
+    include MultipartTryWritable
 
     @@default_action = :bind
 
@@ -42,6 +43,18 @@ module OMQ
       @strategy.subscriber_joined
     end
 
+    def subscription_count : Int64
+      @strategy.subscription_count
+    end
+
+    def wait_subscribed(min_subscriptions : Int, timeout : Time::Span) : Int64
+      @strategy.wait_subscribed(min_subscriptions, timeout)
+    end
+
+    def wait_subscribed(timeout : Time::Span) : Int64
+      wait_subscribed(1, timeout)
+    end
+
     protected def socket_type : String
       SOCKET_TYPE
     end
@@ -72,6 +85,8 @@ module OMQ
   class XPUB < Socket
     include QueueReadable
     include QueueWritable
+    include TryReadable
+    include MultipartTryWritable
 
     @@default_action = :bind
 
@@ -110,6 +125,18 @@ module OMQ
 
     def subscriber_joined : Channel(Pipe)
       @strategy.subscriber_joined
+    end
+
+    def subscription_count : Int64
+      @strategy.subscription_count
+    end
+
+    def wait_subscribed(min_subscriptions : Int, timeout : Time::Span) : Int64
+      @strategy.wait_subscribed(min_subscriptions, timeout)
+    end
+
+    def wait_subscribed(timeout : Time::Span) : Int64
+      wait_subscribed(1, timeout)
     end
 
     def receive : Message
@@ -153,6 +180,8 @@ module OMQ
   # that send the ZMTP-3.0-style `\x01 + prefix` / `\x00 + prefix` frames.
   class XSUB < Socket
     include QueueWritable
+    include TryReadable
+    include MultipartTryWritable
 
     @@default_action = :connect
 
@@ -166,7 +195,7 @@ module OMQ
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity, @options.conflate)
     end
 
     def send(msg : String) : self
@@ -246,6 +275,7 @@ module OMQ
   # prefix are surfaced to the app.
   class SUB < Socket
     include QueueReadable
+    include TryReadable
 
     @@default_action = :connect
 
@@ -261,7 +291,7 @@ module OMQ
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity, @options.conflate)
     end
 
     def subscribe(prefix : String = "") : self

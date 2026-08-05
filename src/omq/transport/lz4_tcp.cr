@@ -219,11 +219,13 @@ module OMQ
         tcp.tcp_nodelay = true
         tcp.send_buffer_size = sndbuf if sndbuf
         tcp.recv_buffer_size = rcvbuf if rcvbuf
+        peer_address = TCP.peer_address(tcp)
         raw = ZMTP::Connection.new(tcp, mechanism, wire_frame_limit(max_message_size))
         raw.handshake(
           local_socket_type: local_socket_type,
           local_identity: local_identity,
           as_server: as_server,
+          peer_address: peer_address,
         )
         zmtp = Connection.new(raw, send_dict_bytes: lz4_dict, max_message_size: max_message_size, auto_dict: auto_dict)
 
@@ -254,6 +256,7 @@ module OMQ
           close_signal: close_signal,
         )
         pipe.peer_zmtp_minor = zmtp.peer_minor
+        pipe.peer_address = peer_address
         if identity = zmtp.peer_properties["Identity"]?
           pipe.peer_identity = identity
         end

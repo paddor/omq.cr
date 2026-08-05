@@ -1,66 +1,38 @@
-require "wait_group"
+require "./round_robin_send"
 
 module OMQ
   module Routing
-    # SCATTER routing: work-stealing send across GATHER peers. Same
-    # mechanics as `Push` — shared `tx` channel, per-pipe pump fiber.
+    # SCATTER routing: round-robin send across GATHER peers.
     class Scatter < Strategy
-      getter tx : Channel(Message)
-
       def initialize(capacity : Int32)
-        @tx = Channel(Message).new(capacity)
+        @send = RoundRobinSend.new(capacity)
         @closed = Atomic(Bool).new(false)
-        @pumps = WaitGroup.new
       end
+
+      delegate tx, to: @send
 
       def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
         return if closed?
-        @tx = Channel(Message).new(send_hwm)
+        @send.commit_capacity(send_hwm)
       end
 
       def attach(pipe : Pipe) : Nil
         return if closed?
-        @pumps.spawn { pump(pipe) }
+        @send.attach(pipe)
       end
 
       def close_send : Nil
         return unless close_once
-        @tx.close
+        @send.close_send
       end
 
       def close : Nil
         close_send
+        @send.close
       end
 
       def await_drained(span : Time::Span?) : Bool
-        done = Channel(Nil).new
-        spawn do
-          @pumps.wait
-          done.close
-        end
-        case span
-        when nil
-          done.receive?
-          true
-        else
-          select
-          when done.receive?
-            true
-          when timeout(span)
-            false
-          end
-        end
-      end
-
-      private def pump(pipe : Pipe) : Nil
-        while msg = receive_send(@tx, pipe)
-          begin
-            pipe.tx.send(msg)
-          rescue Channel::ClosedError
-            restore_send(@tx, msg)
-            break
-          end
-        end
+        @send.await_drained(span)
       end
     end
   end

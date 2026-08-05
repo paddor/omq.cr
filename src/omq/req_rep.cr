@@ -4,6 +4,8 @@ module OMQ
   class REQ < Socket
     include QueueReadable
     include QueueWritable
+    include TryReadable
+    include MultipartTryWritable
 
     @@default_action = :connect
 
@@ -75,6 +77,7 @@ module OMQ
   class REP < Socket
     include QueueReadable
     include QueueWritable
+    include MultipartTryWritable
 
     @@default_action = :bind
 
@@ -121,6 +124,14 @@ module OMQ
       @strategy.receive?
     end
 
+    def try_receive : Message?
+      @strategy.try_receive
+    end
+
+    def try_recv : Message?
+      try_receive
+    end
+
     protected def socket_type : String
       SOCKET_TYPE
     end
@@ -136,6 +147,12 @@ module OMQ
     private def send_frames(frames : Message) : self
       @strategy.send(frames, timeout: @options.write_timeout)
       self
+    rescue Channel::ClosedError
+      raise ClosedError.new("socket closed while sending")
+    end
+
+    private def try_send_frames(frames : Message) : Bool
+      @strategy.try_send(frames)
     rescue Channel::ClosedError
       raise ClosedError.new("socket closed while sending")
     end

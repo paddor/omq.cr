@@ -16,7 +16,7 @@ describe "PUSH/PULL over inproc" do
     end
   end
 
-  it "work-steals across multiple PULL peers" do
+  it "round-robins across multiple PULL peers" do
     OMQ::TestHelper.with_timeout(5.seconds) do
       push = OMQ::PUSH.bind("inproc://pp-fanout")
 
@@ -47,6 +47,92 @@ describe "PUSH/PULL over inproc" do
 
       push.close
       pulls.each(&.close)
+    end
+  end
+
+  it "delivers two rounds to each PULL peer" do
+    OMQ::TestHelper.with_timeout(5.seconds) do
+      push = OMQ::PUSH.bind("inproc://pp-round-robin")
+
+      pulls = Array.new(5) do
+        pull = OMQ::PULL.connect("inproc://pp-round-robin")
+        pull.read_timeout = 500.milliseconds
+        pull
+      end
+      OMQ::TestHelper.wait_until { push.peer_count == pulls.size }
+
+      pulls.size.times { push.send("ABC") }
+      pulls.size.times { push.send("DEF") }
+
+      pulls.each do |pull|
+        assert_equal "ABC", String.new(pull.receive[0])
+        assert_equal "DEF", String.new(pull.receive[0])
+      end
+
+      push.close
+      pulls.each(&.close)
+    end
+  end
+
+  it "weights duplicate connects as separate round-robin pipes" do
+    OMQ::TestHelper.with_timeout(5.seconds) do
+      pull_a = OMQ::PULL.bind("inproc://pp-weight-a")
+      pull_b = OMQ::PULL.bind("inproc://pp-weight-b")
+      push = OMQ::PUSH.new
+
+      push.connect("inproc://pp-weight-a")
+      push.connect("inproc://pp-weight-a")
+      push.connect("inproc://pp-weight-b")
+      OMQ::TestHelper.wait_until { pull_a.peer_count == 2 && pull_b.peer_count == 1 && push.peer_count == 3 }
+
+      90.times { |i| push.send("weighted-#{i}") }
+
+      count_a = 0
+      count_b = 0
+      drain_done = Channel(Nil).new(2)
+
+      spawn do
+        60.times { pull_a.receive; count_a += 1 }
+        drain_done.send(nil)
+      end
+      spawn do
+        30.times { pull_b.receive; count_b += 1 }
+        drain_done.send(nil)
+      end
+
+      2.times { drain_done.receive }
+      assert_equal 60, count_a
+      assert_equal 30, count_b
+
+      push.close
+      pull_a.close
+      pull_b.close
+    end
+  end
+
+  it "keeps sending to fast peers when one peer is full" do
+    OMQ::TestHelper.with_timeout(5.seconds) do
+      push = OMQ::PUSH.new(send_hwm: 4, recv_hwm: 4, write_timeout: 500.milliseconds)
+      push.bind("inproc://pp-slow-peer")
+
+      slow = OMQ::PULL.connect("inproc://pp-slow-peer", recv_hwm: 4)
+      fast = OMQ::PULL.connect("inproc://pp-slow-peer")
+      OMQ::TestHelper.wait_until { push.peer_count == 2 }
+
+      fast_received = Atomic(Int32).new(0)
+      spawn do
+        while fast.receive?
+          fast_received.add(1)
+        end
+      end
+
+      100.times { |i| push.send("msg-#{i}") }
+
+      OMQ::TestHelper.wait_until(1.second) { fast_received.get >= 80 }
+
+      push.close
+      slow.close
+      fast.close
     end
   end
 

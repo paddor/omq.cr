@@ -26,6 +26,14 @@ module OMQ
       send_frames([group.to_slice, body])
     end
 
+    def try_publish(group : String, body : String) : Bool
+      try_send_frames([group.to_slice, body.to_slice])
+    end
+
+    def try_publish(group : String, body : Bytes) : Bool
+      try_send_frames([group.to_slice, body])
+    end
+
     def subscriber_joined : ::Channel(Pipe)
       @strategy.subscriber_joined
     end
@@ -52,12 +60,17 @@ module OMQ
     rescue ::Channel::ClosedError
       raise ClosedError.new("socket closed while sending")
     end
+
+    private def try_send_frames(frames : Message) : Bool
+      channel_try_send(@strategy.tx, frames)
+    end
   end
 
   # DISH (draft, ZeroMQ RFC 48): group-based subscriber. #join selects
   # the groups to receive; messages for other groups are dropped.
   class DISH < Socket
     include QueueReadable
+    include TryReadable
 
     @@default_action = :connect
 
@@ -95,7 +108,7 @@ module OMQ
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity, @options.conflate)
     end
 
     protected def attach_pipe(pipe : Pipe) : Nil

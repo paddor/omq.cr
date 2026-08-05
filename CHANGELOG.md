@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- Add PLAIN username/password authentication for ZMTP handshakes.
+- Add `udp://` transport for RADIO/DISH datagrams.
+- Add `STREAM` sockets over raw `tcp://` connections.
+- Add `Socket#wait_connected` and PUB/XPUB `#wait_subscribed` readiness helpers.
+- Make receive-side `conflate` keep only the latest queued message.
+- Add handshake timeouts, a pending-handshake cap, and concurrent accept handshakes.
+- Add identity handover so duplicate identities replace stale ROUTER/SERVER/PEER routes.
+- Add nonblocking `try_send`, `try_receive`, and routed try-send helpers.
+- Add bounded-burst proxy helpers with capture and steerable control support.
+- Add `ConnectionInfo` snapshots and attach them to pipe monitor events.
+- Tighten option handling for nil handshake timeouts, identity length, and handshake caps.
+- Add reconnect/parser hardening coverage and guard READY property parsing.
+
 ## [0.1.0] - 2026-08-03
 
 ### Added

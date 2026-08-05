@@ -26,4 +26,20 @@ describe "PEER over inproc" do
       b.close
     end
   end
+
+  it "uses a PEER identity as the routing ID" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      a = OMQ::PEER.bind("inproc://peer-identity")
+      b = OMQ::PEER.connect("inproc://peer-identity", identity: "peer-b")
+
+      OMQ::TestHelper.wait_until { a.peer_routing_ids.any? { |id| String.new(id) == "peer-b" } }
+
+      a.send_to("peer-b".to_slice, "ping")
+      msg = b.receive
+      assert_equal "ping", String.new(msg[1])
+
+      a.close
+      b.close
+    end
+  end
 end

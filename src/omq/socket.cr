@@ -17,10 +17,15 @@ module OMQ
     @inproc_names = [] of String
     @tcp_listeners = [] of Transport::TCP::Listener
     @ipc_listeners = [] of Transport::IPC::Listener
+    @udp_listeners = [] of Transport::UDP::Listener
     @bound_endpoints = [] of String
     @disabled_connect_endpoints = [] of String
     @pipe_endpoints = {} of Pipe => String
+    @connection_infos = {} of Pipe => ConnectionInfo
+    @connection_infos_by_id = {} of UInt64 => ConnectionInfo
     @pipes = [] of Pipe
+    @pending_handshakes = 0
+    @next_connection_id = 1_u64
     @committed = false
     @state_mutex = Mutex.new
     @shutdown = Channel(Nil).new
@@ -70,6 +75,7 @@ module OMQ
       ensure_open!
       commit_options
       scheme, rest = parse_endpoint(endpoint)
+      reject_stream_non_tcp!(scheme)
       case scheme
       when "inproc"
         listener = Transport::Inproc.bind(rest)
@@ -91,7 +97,11 @@ module OMQ
           raise ex
         end
         emit_monitor(MonitorEvent::Kind::Listening, listener.endpoint)
-        spawn accept_tcp(listener, listener.endpoint)
+        if stream_socket?
+          spawn accept_stream_tcp(listener, listener.endpoint)
+        else
+          spawn accept_tcp(listener, listener.endpoint)
+        end
       when "lz4+tcp"
         listener = Transport::Lz4Tcp.bind(endpoint)
         begin
@@ -112,6 +122,24 @@ module OMQ
         end
         emit_monitor(MonitorEvent::Kind::Listening, endpoint)
         spawn accept_ipc(listener, endpoint)
+      when "udp"
+        raise UnsupportedTransport.new("udp bind requires DISH") unless socket_type == "DISH"
+        listener = Transport::UDP.bind(endpoint)
+        begin
+          track_udp_listener(listener)
+        rescue ex : ClosedError
+          listener.close
+          raise ex
+        end
+        emit_monitor(MonitorEvent::Kind::Listening, listener.endpoint)
+        pipe = Transport::UDP.adopt_receiver(
+          listener.socket,
+          send_capacity: @options.send_capacity,
+          recv_capacity: @options.recv_capacity,
+        )
+        if register_pipe(pipe, listener.endpoint)
+          spawn watch_pipe_close(pipe, listener.endpoint)
+        end
       else
         raise UnsupportedTransport.new(scheme)
       end
@@ -121,8 +149,9 @@ module OMQ
     def connect(endpoint : String) : self
       ensure_open!
       commit_options
-      enable_connect_endpoint(endpoint)
       scheme, rest = parse_endpoint(endpoint)
+      reject_stream_non_tcp!(scheme)
+      enable_connect_endpoint(endpoint)
       case scheme
       when "inproc"
         pipe = Transport::Inproc.connect(rest, capacity: @options.recv_capacity, local_identity: @options.identity)
@@ -138,11 +167,24 @@ module OMQ
           pipe = dial(scheme, endpoint)
           if register_pipe(pipe, endpoint)
             emit_monitor(MonitorEvent::Kind::Connected, endpoint, pipe)
+            emit_monitor(MonitorEvent::Kind::HandshakeSucceeded, endpoint, pipe)
             spawn supervise_pipe(pipe, scheme, endpoint)
           end
         rescue err : IO::Error | ProtocolError
           emit_monitor(MonitorEvent::Kind::ConnectDelayed, endpoint, error: err)
           spawn connection_manager(scheme, endpoint, initial_delay: nil)
+        end
+      when "udp"
+        raise UnsupportedTransport.new("udp connect requires RADIO") unless socket_type == "RADIO"
+        socket = Transport::UDP.connect(endpoint)
+        pipe = Transport::UDP.adopt_sender(
+          socket,
+          send_capacity: @options.send_capacity,
+          recv_capacity: @options.recv_capacity,
+        )
+        if register_pipe(pipe, endpoint)
+          emit_monitor(MonitorEvent::Kind::Connected, endpoint, pipe)
+          spawn watch_pipe_close(pipe, endpoint)
         end
       else
         raise UnsupportedTransport.new(scheme)
@@ -168,6 +210,8 @@ module OMQ
         close_matching_tcp_listeners(endpoint)
       when "ipc"
         close_matching_ipc_listeners(endpoint)
+      when "udp"
+        close_matching_udp_listeners(endpoint)
       else
         raise UnsupportedTransport.new(scheme)
       end
@@ -181,7 +225,7 @@ module OMQ
     end
 
     def close : Nil
-      inproc_names, tcp_listeners, ipc_listeners, pipes = @state_mutex.synchronize do
+      inproc_names, tcp_listeners, ipc_listeners, udp_listeners, pipes = @state_mutex.synchronize do
         return if @closed
         @closed = true
         @shutdown.close unless @shutdown.closed?
@@ -189,22 +233,27 @@ module OMQ
         inproc_snapshot = @inproc_names.dup
         tcp_snapshot = @tcp_listeners.dup
         ipc_snapshot = @ipc_listeners.dup
+        udp_snapshot = @udp_listeners.dup
         pipe_snapshot = @pipes.dup
 
         @inproc_names.clear
         @tcp_listeners.clear
         @ipc_listeners.clear
+        @udp_listeners.clear
         @bound_endpoints.clear
         @disabled_connect_endpoints.clear
         @pipe_endpoints.clear
+        @connection_infos.clear
+        @connection_infos_by_id.clear
         @pipes.clear
 
-        {inproc_snapshot, tcp_snapshot, ipc_snapshot, pipe_snapshot}
+        {inproc_snapshot, tcp_snapshot, ipc_snapshot, udp_snapshot, pipe_snapshot}
       end
 
       inproc_names.each { |n| Transport::Inproc.unbind(n) }
       tcp_listeners.each(&.close)
       ipc_listeners.each(&.close)
+      udp_listeners.each(&.close)
       drain_for_linger(@options.linger, pipes)
       pipes.each(&.close)
       emit_monitor(MonitorEvent::Kind::Closed, "")
@@ -234,11 +283,21 @@ module OMQ
       end
     end
 
-    private def emit_monitor(kind : MonitorEvent::Kind, endpoint : String, pipe : Pipe? = nil, error : Exception? = nil) : Nil
+    private def emit_monitor(
+      kind : MonitorEvent::Kind,
+      endpoint : String,
+      pipe : Pipe? = nil,
+      error : Exception? = nil,
+      connection : ConnectionInfo? = nil,
+      reason : DisconnectReason? = nil,
+      peer_address : String? = nil,
+    ) : Nil
       ch = @state_mutex.synchronize { @monitor }
       return unless ch
       return if ch.closed?
-      ev = MonitorEvent.new(kind, endpoint, pipe, error)
+      info = connection || pipe.try { |p| @state_mutex.synchronize { @connection_infos[p]? } }
+      address = peer_address || info.try(&.peer_address) || pipe.try(&.peer_address)
+      ev = MonitorEvent.new(kind, endpoint, pipe, error, info, reason, address)
       select
       when ch.send(ev)
       else
@@ -252,8 +311,11 @@ module OMQ
     private def supervise_pipe(pipe : Pipe, scheme : String, endpoint : String) : Nil
       pipe.await_closed
       return if closed?
-      return unless unregister_pipe(pipe)
-      emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe)
+      removed = unregister_pipe(pipe)
+      return unless removed
+      _removed_endpoint, info = removed
+      reason = pipe.disconnect_reason || DisconnectReason::PeerClosed
+      emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe, connection: info, reason: reason)
       return if connect_endpoint_disabled?(endpoint)
       connection_manager(scheme, endpoint, initial_delay: nil)
     end
@@ -275,10 +337,14 @@ module OMQ
         end
         next unless register_pipe(pipe, endpoint)
         emit_monitor(MonitorEvent::Kind::Connected, endpoint, pipe)
+        emit_monitor(MonitorEvent::Kind::HandshakeSucceeded, endpoint, pipe)
         pipe.await_closed
         break unless connect_endpoint_enabled?(endpoint)
-        next unless unregister_pipe(pipe)
-        emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe)
+        removed = unregister_pipe(pipe)
+        next unless removed
+        _removed_endpoint, info = removed
+        reason = pipe.disconnect_reason || DisconnectReason::PeerClosed
+        emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe, connection: info, reason: reason)
         delay_hint = nil
       end
     end
@@ -287,57 +353,73 @@ module OMQ
       case scheme
       when "tcp"
         tcp = Transport::TCP.connect(endpoint)
-        Transport::TCP.adopt(
-          tcp,
-          local_socket_type: socket_type,
-          local_identity: @options.identity,
-          as_server: false,
-          send_capacity: @options.send_capacity,
-          recv_capacity: @options.recv_capacity,
-          mechanism: @options.mechanism,
-          max_message_size: @options.max_message_size,
-          heartbeat_interval: @options.heartbeat_interval,
-          heartbeat_ttl: @options.heartbeat_ttl,
-          heartbeat_timeout: @options.heartbeat_timeout,
-          sndbuf: @options.sndbuf,
-          rcvbuf: @options.rcvbuf,
-        )
+        if stream_socket?
+          Transport::StreamRaw.adopt(
+            tcp,
+            send_capacity: @options.send_capacity,
+            recv_capacity: @options.recv_capacity,
+            sndbuf: @options.sndbuf,
+            rcvbuf: @options.rcvbuf,
+          )
+        else
+          with_handshake_timeout(tcp) do
+            Transport::TCP.adopt(
+              tcp,
+              local_socket_type: socket_type,
+              local_identity: @options.identity,
+              as_server: false,
+              send_capacity: @options.send_capacity,
+              recv_capacity: @options.recv_capacity,
+              mechanism: @options.mechanism,
+              max_message_size: @options.max_message_size,
+              heartbeat_interval: @options.heartbeat_interval,
+              heartbeat_ttl: @options.heartbeat_ttl,
+              heartbeat_timeout: @options.heartbeat_timeout,
+              sndbuf: @options.sndbuf,
+              rcvbuf: @options.rcvbuf,
+            )
+          end
+        end
       when "lz4+tcp"
         tcp = Transport::Lz4Tcp.connect(endpoint)
-        Transport::Lz4Tcp.adopt(
-          tcp,
-          local_socket_type: socket_type,
-          local_identity: @options.identity,
-          as_server: false,
-          send_capacity: @options.send_capacity,
-          recv_capacity: @options.recv_capacity,
-          mechanism: @options.mechanism,
-          max_message_size: @options.max_message_size,
-          heartbeat_interval: @options.heartbeat_interval,
-          heartbeat_ttl: @options.heartbeat_ttl,
-          heartbeat_timeout: @options.heartbeat_timeout,
-          sndbuf: @options.sndbuf,
-          rcvbuf: @options.rcvbuf,
-          lz4_dict: @options.lz4_dict,
-          auto_dict: @options.lz4_auto_dict,
-        )
+        with_handshake_timeout(tcp) do
+          Transport::Lz4Tcp.adopt(
+            tcp,
+            local_socket_type: socket_type,
+            local_identity: @options.identity,
+            as_server: false,
+            send_capacity: @options.send_capacity,
+            recv_capacity: @options.recv_capacity,
+            mechanism: @options.mechanism,
+            max_message_size: @options.max_message_size,
+            heartbeat_interval: @options.heartbeat_interval,
+            heartbeat_ttl: @options.heartbeat_ttl,
+            heartbeat_timeout: @options.heartbeat_timeout,
+            sndbuf: @options.sndbuf,
+            rcvbuf: @options.rcvbuf,
+            lz4_dict: @options.lz4_dict,
+            auto_dict: @options.lz4_auto_dict,
+          )
+        end
       when "ipc"
         unix = Transport::IPC.connect(endpoint)
-        Transport::IPC.adopt(
-          unix,
-          local_socket_type: socket_type,
-          local_identity: @options.identity,
-          as_server: false,
-          send_capacity: @options.send_capacity,
-          recv_capacity: @options.recv_capacity,
-          mechanism: @options.mechanism,
-          max_message_size: @options.max_message_size,
-          heartbeat_interval: @options.heartbeat_interval,
-          heartbeat_ttl: @options.heartbeat_ttl,
-          heartbeat_timeout: @options.heartbeat_timeout,
-          sndbuf: @options.sndbuf,
-          rcvbuf: @options.rcvbuf,
-        )
+        with_handshake_timeout(unix) do
+          Transport::IPC.adopt(
+            unix,
+            local_socket_type: socket_type,
+            local_identity: @options.identity,
+            as_server: false,
+            send_capacity: @options.send_capacity,
+            recv_capacity: @options.recv_capacity,
+            mechanism: @options.mechanism,
+            max_message_size: @options.max_message_size,
+            heartbeat_interval: @options.heartbeat_interval,
+            heartbeat_ttl: @options.heartbeat_ttl,
+            heartbeat_timeout: @options.heartbeat_timeout,
+            sndbuf: @options.sndbuf,
+            rcvbuf: @options.rcvbuf,
+          )
+        end
       else
         raise UnsupportedTransport.new(scheme)
       end
@@ -388,15 +470,45 @@ module OMQ
       left.positive? ? left : 0.seconds
     end
 
-    # Last-bound TCP port, or `nil` if not bound over TCP.
+    # Last-bound TCP/UDP port, or `nil` if not bound over either.
     def port : Int32?
-      @state_mutex.synchronize { @tcp_listeners.first?.try(&.port) }
+      @state_mutex.synchronize { @tcp_listeners.first?.try(&.port) || @udp_listeners.first?.try(&.port) }
     end
 
     # Number of live pipes — a rough peer count useful for benches and tests
     # that want to wait until a handshake has completed.
     def peer_count : Int32
       @state_mutex.synchronize { @pipes.count { |p| !p.closed? } }
+    end
+
+    def connections : Array(ConnectionInfo)
+      @state_mutex.synchronize { @connection_infos_by_id.values.sort_by(&.id) }
+    end
+
+    def connection_info(id : UInt64) : ConnectionInfo?
+      @state_mutex.synchronize { @connection_infos_by_id[id]? }
+    end
+
+    # Wait until at least `min_peers` pipes are ready for data-plane routing.
+    # TCP/IPC peers count only after ZMTP handshake; STREAM peers count once
+    # the raw TCP connection is adopted.
+    def wait_connected(min_peers : Int, timeout : Time::Span) : Int32
+      raise ArgumentError.new("min_peers must be >= 0") if min_peers < 0
+      deadline = Time.instant + timeout
+      loop do
+        count = peer_count
+        return count if count >= min_peers
+        raise ClosedError.new("socket closed while waiting for peers") if closed?
+
+        remaining = deadline - Time.instant
+        raise IO::TimeoutError.new("wait_connected timed out after #{timeout}") unless remaining.positive?
+        nap = remaining < 5.milliseconds ? remaining : 5.milliseconds
+        raise ClosedError.new("socket closed while waiting for peers") unless sleep_with_shutdown(nap)
+      end
+    end
+
+    def wait_connected(timeout : Time::Span) : Int32
+      wait_connected(1, timeout)
     end
 
     # Send `msg` on `channel`, raising `IO::TimeoutError` if the socket's
@@ -428,6 +540,26 @@ module OMQ
       end
     end
 
+    protected def channel_try_send(channel : Channel(Message), msg : Message) : Bool
+      select
+      when channel.send(msg)
+        true
+      else
+        false
+      end
+    rescue Channel::ClosedError
+      raise ClosedError.new("socket closed while sending")
+    end
+
+    protected def channel_try_receive(channel : Channel(Message)) : Message?
+      select
+      when msg = channel.receive?
+        msg
+      else
+        nil
+      end
+    end
+
     # Subclasses override to wire each pipe into their routing strategy.
     protected abstract def attach_pipe(pipe : Pipe) : Nil
 
@@ -452,6 +584,8 @@ module OMQ
       heartbeat_interval : Time::Span? = nil,
       heartbeat_ttl : Time::Span? = nil,
       heartbeat_timeout : Time::Span? = nil,
+      handshake_timeout : Time::Span | Nil | UnsetOption = UNSET,
+      max_pending_handshakes : Int32? = nil,
       max_message_size : Int64? = nil,
       sndbuf : Int32? = nil,
       rcvbuf : Int32? = nil,
@@ -475,6 +609,8 @@ module OMQ
       @options.heartbeat_interval = heartbeat_interval if heartbeat_interval
       @options.heartbeat_ttl = heartbeat_ttl if heartbeat_ttl
       @options.heartbeat_timeout = heartbeat_timeout if heartbeat_timeout
+      @options.handshake_timeout = handshake_timeout unless handshake_timeout.is_a?(UnsetOption)
+      @options.max_pending_handshakes = max_pending_handshakes if max_pending_handshakes
       @options.max_message_size = max_message_size if max_message_size
       @options.sndbuf = sndbuf if sndbuf
       @options.rcvbuf = rcvbuf if rcvbuf
@@ -524,13 +660,97 @@ module OMQ
       {endpoint[0...idx], endpoint[idx + 3..]}
     end
 
+    private def stream_socket? : Bool
+      socket_type == "STREAM"
+    end
+
+    private def reject_stream_non_tcp!(scheme : String) : Nil
+      return unless stream_socket?
+      return if scheme == "tcp"
+      raise UnsupportedTransport.new("STREAM sockets only support tcp:// endpoints")
+    end
+
+    private def with_handshake_timeout(io : IO, &block : -> Pipe) : Pipe
+      span = @options.handshake_timeout
+      return block.call unless span
+
+      result = Channel(Pipe | Exception).new(1)
+      spawn do
+        begin
+          pipe = block.call
+          result.send(pipe)
+        rescue ex
+          result.send(ex)
+        end
+      end
+
+      select
+      when outcome = result.receive
+        case outcome
+        when Pipe
+          outcome
+        when Exception
+          raise outcome
+        else
+          raise ClosedError.new("handshake worker closed")
+        end
+      when timeout(span)
+        io.close rescue nil
+        spawn close_late_handshake_result(result)
+        raise IO::TimeoutError.new("handshake timed out after #{span}")
+      end
+    end
+
+    private def close_late_handshake_result(result : Channel(Pipe | Exception)) : Nil
+      if outcome = result.receive?
+        outcome.close if outcome.is_a?(Pipe)
+      end
+    rescue Channel::ClosedError
+    end
+
+    private def try_acquire_pending_handshake? : Bool
+      @state_mutex.synchronize do
+        return false if @closed || @pending_handshakes >= @options.max_pending_handshakes
+        @pending_handshakes += 1
+        true
+      end
+    end
+
+    private def release_pending_handshake : Nil
+      @state_mutex.synchronize do
+        @pending_handshakes -= 1 if @pending_handshakes > 0
+      end
+    end
+
+    private def reject_pending_handshake(io : IO, endpoint : String, peer_address : String? = nil) : Nil
+      io.close rescue nil
+      emit_monitor(
+        MonitorEvent::Kind::HandshakeFailed,
+        endpoint,
+        error: Error.new("max pending handshakes reached"),
+        peer_address: peer_address,
+      )
+    end
+
     private def register_pipe(pipe : Pipe, endpoint : String) : Bool
       should_attach = @state_mutex.synchronize do
         if @closed || pipe.closed? || @disabled_connect_endpoints.includes?(endpoint)
           false
         else
+          info = ConnectionInfo.new(
+            id: @next_connection_id,
+            endpoint: endpoint,
+            socket_type: socket_type,
+            peer_identity: pipe.peer_identity,
+            peer_zmtp_minor: pipe.peer_zmtp_minor,
+            connected_at: Time.utc,
+            peer_address: pipe.peer_address,
+          )
+          @next_connection_id += 1
           @pipes << pipe
           @pipe_endpoints[pipe] = endpoint
+          @connection_infos[pipe] = info
+          @connection_infos_by_id[info.id] = info
           true
         end
       end
@@ -543,10 +763,14 @@ module OMQ
       true
     end
 
-    private def unregister_pipe(pipe : Pipe) : String?
+    private def unregister_pipe(pipe : Pipe) : {String, ConnectionInfo?}?
       @state_mutex.synchronize do
+        endpoint = @pipe_endpoints.delete(pipe)
+        return nil unless endpoint
         @pipes.delete(pipe)
-        @pipe_endpoints.delete(pipe)
+        info = @connection_infos.delete(pipe)
+        @connection_infos_by_id.delete(info.id) if info
+        {endpoint, info}
       end
     end
 
@@ -569,10 +793,17 @@ module OMQ
     end
 
     private def close_pipes_at(endpoint : String) : Nil
-      pipes = detach_pipes_at(endpoint)
-      pipes.each do |pipe|
+      removed = detach_pipes_at(endpoint)
+      removed.each do |pipe, info|
+        pipe.mark_disconnect(DisconnectReason::LocalClose)
         pipe.close
-        emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe)
+        emit_monitor(
+          MonitorEvent::Kind::Disconnected,
+          endpoint,
+          pipe,
+          connection: info,
+          reason: DisconnectReason::LocalClose,
+        )
       end
     end
 
@@ -622,14 +853,35 @@ module OMQ
       end
     end
 
-    private def detach_pipes_at(endpoint : String) : Array(Pipe)
+    private def close_matching_udp_listeners(endpoint : String) : Nil
+      _scheme, rest = parse_endpoint(endpoint)
+      _group, _host, port = Transport::UDP.parse_authority(rest)
+      listeners = @state_mutex.synchronize do
+        matches = @udp_listeners.select { |listener| listener.endpoint == endpoint || listener.port == port }
+        matches.each do |listener|
+          @udp_listeners.delete(listener)
+          @bound_endpoints.delete(listener.endpoint)
+        end
+        matches
+      end
+      listeners.each do |listener|
+        listener.close
+        close_pipes_at(listener.endpoint)
+      end
+    end
+
+    private def detach_pipes_at(endpoint : String) : Array({Pipe, ConnectionInfo?})
       @state_mutex.synchronize do
         pipes = @pipes.select { |pipe| @pipe_endpoints[pipe]? == endpoint }
+        removed = [] of {Pipe, ConnectionInfo?}
         pipes.each do |pipe|
           @pipes.delete(pipe)
           @pipe_endpoints.delete(pipe)
+          info = @connection_infos.delete(pipe)
+          @connection_infos_by_id.delete(info.id) if info
+          removed << {pipe, info}
         end
-        pipes
+        removed
       end
     end
 
@@ -657,6 +909,14 @@ module OMQ
       end
     end
 
+    private def track_udp_listener(listener : Transport::UDP::Listener) : Nil
+      @state_mutex.synchronize do
+        raise ClosedError.new("socket closed") if @closed
+        @udp_listeners << listener
+        @bound_endpoints << listener.endpoint
+      end
+    end
+
     private def ensure_open! : Nil
       raise ClosedError.new("socket closed") if closed?
     end
@@ -676,8 +936,19 @@ module OMQ
         tcp = listener.accept
         break unless tcp
         break if closed?
-        begin
-          pipe = Transport::TCP.adopt(
+        unless try_acquire_pending_handshake?
+          reject_pending_handshake(tcp, endpoint, Transport::TCP.peer_address(tcp))
+          next
+        end
+        spawn handle_tcp_accept(tcp, endpoint)
+      end
+    end
+
+    private def handle_tcp_accept(tcp : TCPSocket, endpoint : String) : Nil
+      peer_address = Transport::TCP.peer_address(tcp)
+      begin
+        pipe = with_handshake_timeout(tcp) do
+          Transport::TCP.adopt(
             tcp,
             local_socket_type: socket_type,
             local_identity: @options.identity,
@@ -692,11 +963,38 @@ module OMQ
             sndbuf: @options.sndbuf,
             rcvbuf: @options.rcvbuf,
           )
+        end
+        if register_pipe(pipe, endpoint)
+          emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
+          emit_monitor(MonitorEvent::Kind::HandshakeSucceeded, endpoint, pipe)
+          spawn watch_pipe_close(pipe, endpoint)
+        end
+      rescue err : IO::Error | ProtocolError
+        tcp.close rescue nil
+        emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err, peer_address: peer_address)
+      ensure
+        release_pending_handshake
+      end
+    end
+
+    private def accept_stream_tcp(listener : Transport::TCP::Listener, endpoint : String) : Nil
+      loop do
+        tcp = listener.accept
+        break unless tcp
+        break if closed?
+        begin
+          pipe = Transport::StreamRaw.adopt(
+            tcp,
+            send_capacity: @options.send_capacity,
+            recv_capacity: @options.recv_capacity,
+            sndbuf: @options.sndbuf,
+            rcvbuf: @options.rcvbuf,
+          )
           if register_pipe(pipe, endpoint)
             emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
             spawn watch_pipe_close(pipe, endpoint)
           end
-        rescue err : IO::Error | ProtocolError
+        rescue err : IO::Error
           tcp.close rescue nil
           emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err)
         end
@@ -708,8 +1006,19 @@ module OMQ
         tcp = listener.accept
         break unless tcp
         break if closed?
-        begin
-          pipe = Transport::Lz4Tcp.adopt(
+        unless try_acquire_pending_handshake?
+          reject_pending_handshake(tcp, endpoint, Transport::TCP.peer_address(tcp))
+          next
+        end
+        spawn handle_lz4_tcp_accept(tcp, endpoint)
+      end
+    end
+
+    private def handle_lz4_tcp_accept(tcp : TCPSocket, endpoint : String) : Nil
+      peer_address = Transport::TCP.peer_address(tcp)
+      begin
+        pipe = with_handshake_timeout(tcp) do
+          Transport::Lz4Tcp.adopt(
             tcp,
             local_socket_type: socket_type,
             local_identity: @options.identity,
@@ -726,14 +1035,17 @@ module OMQ
             lz4_dict: @options.lz4_dict,
             auto_dict: @options.lz4_auto_dict,
           )
-          if register_pipe(pipe, endpoint)
-            emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
-            spawn watch_pipe_close(pipe, endpoint)
-          end
-        rescue err : IO::Error | ProtocolError
-          tcp.close rescue nil
-          emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err)
         end
+        if register_pipe(pipe, endpoint)
+          emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
+          emit_monitor(MonitorEvent::Kind::HandshakeSucceeded, endpoint, pipe)
+          spawn watch_pipe_close(pipe, endpoint)
+        end
+      rescue err : IO::Error | ProtocolError
+        tcp.close rescue nil
+        emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err, peer_address: peer_address)
+      ensure
+        release_pending_handshake
       end
     end
 
@@ -742,8 +1054,18 @@ module OMQ
         unix = listener.accept
         break unless unix
         break if closed?
-        begin
-          pipe = Transport::IPC.adopt(
+        unless try_acquire_pending_handshake?
+          reject_pending_handshake(unix, endpoint)
+          next
+        end
+        spawn handle_ipc_accept(unix, endpoint)
+      end
+    end
+
+    private def handle_ipc_accept(unix : UNIXSocket, endpoint : String) : Nil
+      begin
+        pipe = with_handshake_timeout(unix) do
+          Transport::IPC.adopt(
             unix,
             local_socket_type: socket_type,
             local_identity: @options.identity,
@@ -758,35 +1080,43 @@ module OMQ
             sndbuf: @options.sndbuf,
             rcvbuf: @options.rcvbuf,
           )
-          if register_pipe(pipe, endpoint)
-            emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
-            spawn watch_pipe_close(pipe, endpoint)
-          end
-        rescue err : IO::Error | ProtocolError
-          unix.close rescue nil
-          emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err)
         end
+        if register_pipe(pipe, endpoint)
+          emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
+          emit_monitor(MonitorEvent::Kind::HandshakeSucceeded, endpoint, pipe)
+          spawn watch_pipe_close(pipe, endpoint)
+        end
+      rescue err : IO::Error | ProtocolError
+        unix.close rescue nil
+        emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err)
+      ensure
+        release_pending_handshake
       end
     end
 
     private def watch_pipe_close(pipe : Pipe, endpoint : String) : Nil
       pipe.await_terminated
       return if closed?
-      return unless unregister_pipe(pipe)
-      emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe)
+      removed = unregister_pipe(pipe)
+      return unless removed
+      _removed_endpoint, info = removed
+      reason = pipe.disconnect_reason || DisconnectReason::PeerClosed
+      emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe, connection: info, reason: reason)
     end
 
     delegate send_hwm, recv_hwm, linger, identity,
       read_timeout, write_timeout, recv_timeout, send_timeout,
       reconnect_interval, heartbeat_interval, heartbeat_ttl, heartbeat_timeout,
-      max_message_size, sndbuf, rcvbuf, on_mute, conflate, mechanism,
+      handshake_timeout, max_pending_handshakes, max_message_size, sndbuf, rcvbuf,
+      on_mute, conflate, mechanism,
       router_mandatory?, lz4_dict, dict, lz4_auto_dict, auto_dict, to: @options
 
     {% for m in %w(send_hwm recv_hwm linger identity read_timeout write_timeout
                   recv_timeout send_timeout reconnect_interval heartbeat_interval
-                  heartbeat_ttl heartbeat_timeout max_message_size sndbuf rcvbuf
-                  on_mute conflate mechanism router_mandatory lz4_dict dict
-                  lz4_auto_dict auto_dict) %}
+                  heartbeat_ttl heartbeat_timeout handshake_timeout
+                  max_pending_handshakes max_message_size sndbuf rcvbuf on_mute
+                  conflate mechanism router_mandatory lz4_dict dict lz4_auto_dict
+                  auto_dict) %}
       def {{m.id}}=(val)
         @options.{{m.id}} = val
       end

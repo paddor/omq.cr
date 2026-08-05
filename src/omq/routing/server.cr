@@ -1,9 +1,7 @@
 module OMQ
   module Routing
-    # SERVER routing: identity-based with auto-generated 4-byte routing
-    # IDs, one per connected CLIENT peer. On receive prepends the ID;
-    # on send the first frame is the routing ID and the rest is the
-    # body.
+    # SERVER routing: identity-based. Uses the peer's advertised identity
+    # when present, otherwise generates a 4-byte routing ID.
     class Server < Strategy
       getter rx : Channel(Message)
       getter tx : Channel(Message)
@@ -25,8 +23,10 @@ module OMQ
 
       def attach(pipe : Pipe) : Nil
         return if closed?
-        id = Random::Secure.random_bytes(4)
-        @mutex.synchronize { @pipes_by_id[id] = pipe }
+        id = pipe.peer_identity.dup
+        id = Random::Secure.random_bytes(4) if id.empty?
+        pipe.peer_identity = id
+        replace_route(id, pipe)
         spawn recv_pump(pipe, id)
       end
 
@@ -34,6 +34,25 @@ module OMQ
         return unless close_once
         @tx.close
         @rx.close
+      end
+
+      private def replace_route(id : Bytes, pipe : Pipe) : Nil
+        old = @mutex.synchronize do
+          previous = @pipes_by_id[id]?
+          @pipes_by_id[id] = pipe
+          previous
+        end
+        if old && !old.same?(pipe)
+          old.mark_disconnect(DisconnectReason::Handover)
+          old.close
+        end
+      end
+
+      private def forget_route(id : Bytes, pipe : Pipe) : Nil
+        @mutex.synchronize do
+          current = @pipes_by_id[id]?
+          @pipes_by_id.delete(id) if current && current.same?(pipe)
+        end
       end
 
       private def recv_pump(pipe : Pipe, id : Bytes) : Nil
@@ -48,7 +67,7 @@ module OMQ
           end
         end
       ensure
-        @mutex.synchronize { @pipes_by_id.delete(id) }
+        forget_route(id, pipe)
       end
 
       private def dispatcher : Nil
@@ -61,7 +80,7 @@ module OMQ
           begin
             pipe.tx.send(body)
           rescue Channel::ClosedError
-            @mutex.synchronize { @pipes_by_id.delete(id) }
+            forget_route(id, pipe)
           end
         end
       end

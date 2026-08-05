@@ -3,10 +3,12 @@ require "./routing/peer"
 
 module OMQ
   # PEER (draft, ZeroMQ RFC 51): bidirectional multi-peer socket.
-  # Each connected peer gets a 4-byte routing ID; #receive surfaces it
-  # as the first frame, #send_to addresses a specific peer.
+  # Each connected peer is addressed by its identity when present, or by
+  # a generated 4-byte routing ID. #receive surfaces it as the first
+  # frame; #send_to addresses a specific peer.
   class PEER < Socket
     include QueueReadable
+    include TryReadable
 
     @@default_action = :connect
 
@@ -25,6 +27,14 @@ module OMQ
 
     def send_to(routing_id : Bytes, msg : Bytes) : self
       send_frames([routing_id, msg])
+    end
+
+    def try_send_to(routing_id : Bytes, msg : String) : Bool
+      try_send_frames([routing_id, msg.to_slice])
+    end
+
+    def try_send_to(routing_id : Bytes, msg : Bytes) : Bool
+      try_send_frames([routing_id, msg])
     end
 
     # Snapshot of currently-connected peer routing IDs.
@@ -63,6 +73,10 @@ module OMQ
       self
     rescue Channel::ClosedError
       raise ClosedError.new("socket closed while sending")
+    end
+
+    private def try_send_frames(frames : Message) : Bool
+      channel_try_send(@strategy.tx, frames)
     end
   end
 end

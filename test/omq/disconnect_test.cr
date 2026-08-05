@@ -39,6 +39,7 @@ describe "disconnect / unbind" do
       disconnected = events.receive
       assert_equal OMQ::MonitorEvent::Kind::Disconnected, disconnected.kind
       assert_equal "inproc://disconnect-monitor", disconnected.endpoint
+      assert_equal OMQ::DisconnectReason::LocalClose, disconnected.reason
 
       push.close
       pull.close

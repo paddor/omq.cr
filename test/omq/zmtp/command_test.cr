@@ -27,6 +27,27 @@ describe "OMQ::ZMTP::Command" do
     assert_equal "bar", String.new(props["X-Foo"])
   end
 
+  it "encodes property bodies for PLAIN INITIATE" do
+    body = OMQ::ZMTP::Command.properties("DEALER", "worker".to_slice)
+    props = OMQ::ZMTP::Command.parse_properties(body)
+    assert_equal "DEALER", String.new(props["Socket-Type"])
+    assert_equal "worker", String.new(props["Identity"])
+  end
+
+  it "encodes generic commands" do
+    payload = OMQ::ZMTP::Command.named("WELCOME")
+    name, body = OMQ::ZMTP::Command.parse(payload)
+    assert_equal "WELCOME", name
+    assert_empty body
+  end
+
+  it "round-trips ERROR commands" do
+    payload = OMQ::ZMTP::Command.error("bad credentials")
+    name, body = OMQ::ZMTP::Command.parse(payload)
+    assert_equal "ERROR", name
+    assert_equal "bad credentials", OMQ::ZMTP::Command.parse_error(body)
+  end
+
   it "round-trips SUBSCRIBE / CANCEL" do
     sub = OMQ::ZMTP::Command.subscribe("topic".to_slice)
     name, body = OMQ::ZMTP::Command.parse(sub)
@@ -66,5 +87,16 @@ describe "OMQ::ZMTP::Command" do
   it "rejects a truncated command" do
     # name-length byte claims 10, but only 3 bytes of name follow
     assert_raises(OMQ::ProtocolError) { OMQ::ZMTP::Command.parse(Bytes[10, 65, 66, 67]) }
+  end
+
+  it "rejects truncated READY properties before allocating value storage" do
+    huge_value = Bytes[
+      1, 88,                  # property name: "X"
+      0xFF, 0xFF, 0xFF, 0xFF, # claimed value length
+    ]
+
+    assert_raises(OMQ::ProtocolError) { OMQ::ZMTP::Command.parse_properties(huge_value) }
+    assert_raises(OMQ::ProtocolError) { OMQ::ZMTP::Command.parse_properties(Bytes[5, 65]) }
+    assert_raises(OMQ::ProtocolError) { OMQ::ZMTP::Command.parse_properties(Bytes[1, 65, 0]) }
   end
 end

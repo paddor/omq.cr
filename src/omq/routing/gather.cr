@@ -8,12 +8,14 @@ module OMQ
 
       def initialize(capacity : Int32)
         @rx = Channel(Message).new(capacity)
+        @conflate = false
         @closed = Atomic(Bool).new(false)
       end
 
-      def commit_capacity(send_hwm : Int32, recv_hwm : Int32) : Nil
+      def commit_capacity(send_hwm : Int32, recv_hwm : Int32, conflate : Bool = false) : Nil
         return if closed?
-        @rx = Channel(Message).new(recv_hwm)
+        @conflate = conflate
+        @rx = Channel(Message).new(conflate ? 1 : recv_hwm)
       end
 
       def attach(pipe : Pipe) : Nil
@@ -28,11 +30,7 @@ module OMQ
 
       private def drain(pipe : Pipe) : Nil
         while msg = pipe.rx.receive?
-          begin
-            @rx.send(msg)
-          rescue Channel::ClosedError
-            break
-          end
+          break unless deliver_receive(@rx, msg, @conflate)
         end
       end
     end

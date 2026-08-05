@@ -3,7 +3,8 @@ module OMQ
   # and `Int32` for byte/message counts. `nil` usually means disabled/OS
   # default; explicit nil HWM maps to 0, Ruby OMQ's unbounded spelling.
   class Options
-    DEFAULT_HWM = 1000
+    DEFAULT_HWM       = 1000
+    MAX_IDENTITY_SIZE =  255
     # Crystal's Channel is always bounded and preallocates for large
     # capacities. HWM=0 keeps the public "unbounded" spelling, but maps to
     # a generous internal cap until OMQ grows a dedicated unbounded queue.
@@ -36,6 +37,8 @@ module OMQ
     property heartbeat_interval : Time::Span? = nil
     property heartbeat_ttl : Time::Span? = nil
     property heartbeat_timeout : Time::Span? = nil
+    property handshake_timeout : Time::Span? = 30.seconds
+    @max_pending_handshakes : Int32 = 1024
 
     property max_message_size : Int64? = nil
 
@@ -92,6 +95,15 @@ module OMQ
       hwm == 0 ? UNBOUNDED_HWM_CAPACITY : hwm
     end
 
+    def max_pending_handshakes : Int32
+      @max_pending_handshakes
+    end
+
+    def max_pending_handshakes=(val : Int32)
+      raise ArgumentError.new("max_pending_handshakes must be >= 0 (got #{val})") if val < 0
+      @max_pending_handshakes = val
+    end
+
     def recv_timeout=(val : Time::Span?)
       @read_timeout = val
     end
@@ -109,10 +121,11 @@ module OMQ
     end
 
     def identity=(val : String)
-      @identity = val.to_slice
+      self.identity = val.to_slice
     end
 
     def identity=(val : Bytes)
+      raise ArgumentError.new("identity must be <= #{MAX_IDENTITY_SIZE} bytes (got #{val.size})") if val.size > MAX_IDENTITY_SIZE
       @identity = val.dup
     end
 

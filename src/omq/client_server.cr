@@ -9,6 +9,8 @@ module OMQ
   class CLIENT < Socket
     include QueueReadable
     include QueueWritable
+    include TryReadable
+    include SingleFrameTryWritable
 
     @@default_action = :connect
 
@@ -67,11 +69,13 @@ module OMQ
     end
   end
 
-  # SERVER (draft, ZeroMQ RFC 41): asynchronous reply socket. Assigns a
-  # 4-byte routing ID to each connected CLIENT; #receive surfaces the
-  # ID as the first frame, #send_to replies to a specific peer by ID.
+  # SERVER (draft, ZeroMQ RFC 41): asynchronous reply socket. Uses the
+  # CLIENT identity as the routing ID when present, otherwise assigns a
+  # 4-byte ID. #receive surfaces the ID as the first frame; #send_to
+  # replies to a specific peer by ID.
   class SERVER < Socket
     include QueueReadable
+    include TryReadable
 
     @@default_action = :bind
 
@@ -90,6 +94,14 @@ module OMQ
 
     def send_to(routing_id : Bytes, msg : Bytes) : self
       send_frames([routing_id, msg])
+    end
+
+    def try_send_to(routing_id : Bytes, msg : String) : Bool
+      try_send_frames([routing_id, msg.to_slice])
+    end
+
+    def try_send_to(routing_id : Bytes, msg : Bytes) : Bool
+      try_send_frames([routing_id, msg])
     end
 
     def receive : Message
@@ -123,6 +135,10 @@ module OMQ
       self
     rescue Channel::ClosedError
       raise ClosedError.new("socket closed while sending")
+    end
+
+    private def try_send_frames(frames : Message) : Bool
+      channel_try_send(@strategy.tx, frames)
     end
   end
 end

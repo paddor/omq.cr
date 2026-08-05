@@ -2,6 +2,7 @@ module OMQ
   # PUSH: write-only, work-stealing send across PULL peers.
   class PUSH < Socket
     include QueueWritable
+    include MultipartTryWritable
 
     @@default_action = :connect
 
@@ -69,6 +70,7 @@ module OMQ
   # PULL: read-only, fair-queue receive from PUSH peers.
   class PULL < Socket
     include QueueReadable
+    include TryReadable
 
     @@default_action = :bind
 
@@ -82,7 +84,7 @@ module OMQ
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity, @options.conflate)
     end
 
     def receive : Message

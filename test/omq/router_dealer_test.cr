@@ -139,6 +139,29 @@ describe "DEALER/ROUTER over inproc" do
       router.close
     end
   end
+
+  it "hands a duplicate identity to the newest DEALER" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      router = OMQ::ROUTER.bind("inproc://rd-handover")
+      old_dealer = OMQ::DEALER.connect("inproc://rd-handover", identity: "same")
+
+      old_dealer.send("old")
+      assert_equal ["same", "old"], router.receive.map { |frame| String.new(frame) }
+
+      new_dealer = OMQ::DEALER.connect("inproc://rd-handover", identity: "same")
+      new_dealer.send("new")
+      assert_equal ["same", "new"], router.receive.map { |frame| String.new(frame) }
+
+      OMQ::TestHelper.wait_until { router.peer_count == 1 }
+
+      router.send(["same".to_slice, "reply".to_slice])
+      assert_equal "reply", String.new(new_dealer.receive[0])
+
+      old_dealer.close
+      new_dealer.close
+      router.close
+    end
+  end
 end
 
 describe "DEALER/ROUTER over TCP" do

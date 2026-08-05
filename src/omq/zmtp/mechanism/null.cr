@@ -7,7 +7,14 @@ module OMQ::ZMTP
       NAME
     end
 
-    def handshake(io : IO, *, local_socket_type : String, local_identity : Bytes, as_server : Bool) : Hash(String, Bytes)
+    def handshake(
+      io : IO,
+      *,
+      local_socket_type : String,
+      local_identity : Bytes,
+      as_server : Bool,
+      peer_address : String? = nil,
+    ) : Hash(String, Bytes)
       payload = Command.ready(local_socket_type, local_identity)
       Frame.encode(io, payload, command: true)
       io.flush if io.responds_to?(:flush)
