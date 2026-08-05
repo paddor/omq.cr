@@ -29,9 +29,10 @@ module OMQ
 
       def attach(pipe : Pipe) : Nil
         return if closed?
-        identity = pipe.peer_identity
+        identity = pipe.peer_identity.dup
         identity = Random::Secure.random_bytes(5) if identity.empty?
-        @mutex.synchronize { @pipes_by_id[identity] = pipe }
+        pipe.peer_identity = identity
+        replace_route(identity, pipe)
         spawn recv_pump(pipe, identity)
       end
 
@@ -47,6 +48,22 @@ module OMQ
         @mutex.synchronize { @pipes_by_id[identity]? }
       end
 
+      private def replace_route(identity : Bytes, pipe : Pipe) : Nil
+        old = @mutex.synchronize do
+          previous = @pipes_by_id[identity]?
+          @pipes_by_id[identity] = pipe
+          previous
+        end
+        old.close if old && !old.same?(pipe)
+      end
+
+      private def forget_route(identity : Bytes, pipe : Pipe) : Nil
+        @mutex.synchronize do
+          current = @pipes_by_id[identity]?
+          @pipes_by_id.delete(identity) if current && current.same?(pipe)
+        end
+      end
+
       private def recv_pump(pipe : Pipe, identity : Bytes) : Nil
         while msg = pipe.rx.receive?
           prepended = Message.new(msg.size + 1)
@@ -59,7 +76,7 @@ module OMQ
           end
         end
       ensure
-        @mutex.synchronize { @pipes_by_id.delete(identity) }
+        forget_route(identity, pipe)
       end
 
       private def dispatcher : Nil
@@ -76,7 +93,7 @@ module OMQ
           begin
             pipe.tx.send(body)
           rescue Channel::ClosedError
-            @mutex.synchronize { @pipes_by_id.delete(identity) }
+            forget_route(identity, pipe)
           end
         end
       end

@@ -1,10 +1,8 @@
 module OMQ
   module Routing
-    # PEER routing: bidirectional multi-peer with auto-generated 4-byte
-    # routing IDs. Mechanically identical to `Server` — on receive the ID
-    # is prepended, on send it is consumed to pick the target pipe —
-    # but used for RFC 51's peer-to-peer pattern (either side may bind
-    # or connect).
+    # PEER routing: bidirectional multi-peer with identity-based routing.
+    # Uses advertised peer identities when present, otherwise generates
+    # 4-byte routing IDs.
     class Peer < Strategy
       getter rx : Channel(Message)
       getter tx : Channel(Message)
@@ -26,8 +24,10 @@ module OMQ
 
       def attach(pipe : Pipe) : Nil
         return if closed?
-        id = Random::Secure.random_bytes(4)
-        @mutex.synchronize { @pipes_by_id[id] = pipe }
+        id = pipe.peer_identity.dup
+        id = Random::Secure.random_bytes(4) if id.empty?
+        pipe.peer_identity = id
+        replace_route(id, pipe)
         spawn recv_pump(pipe, id)
       end
 
@@ -44,6 +44,22 @@ module OMQ
         @mutex.synchronize { @pipes_by_id.keys }
       end
 
+      private def replace_route(id : Bytes, pipe : Pipe) : Nil
+        old = @mutex.synchronize do
+          previous = @pipes_by_id[id]?
+          @pipes_by_id[id] = pipe
+          previous
+        end
+        old.close if old && !old.same?(pipe)
+      end
+
+      private def forget_route(id : Bytes, pipe : Pipe) : Nil
+        @mutex.synchronize do
+          current = @pipes_by_id[id]?
+          @pipes_by_id.delete(id) if current && current.same?(pipe)
+        end
+      end
+
       private def recv_pump(pipe : Pipe, id : Bytes) : Nil
         while msg = pipe.rx.receive?
           prepended = Message.new(msg.size + 1)
@@ -56,7 +72,7 @@ module OMQ
           end
         end
       ensure
-        @mutex.synchronize { @pipes_by_id.delete(id) }
+        forget_route(id, pipe)
       end
 
       private def dispatcher : Nil
@@ -69,7 +85,7 @@ module OMQ
           begin
             pipe.tx.send(body)
           rescue Channel::ClosedError
-            @mutex.synchronize { @pipes_by_id.delete(id) }
+            forget_route(id, pipe)
           end
         end
       end

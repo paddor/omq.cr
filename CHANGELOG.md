@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Add `Socket#wait_connected` and PUB/XPUB `#wait_subscribed` readiness helpers.
 - Make receive-side `conflate` keep only the latest queued message.
 - Add handshake timeouts, a pending-handshake cap, and concurrent accept handshakes.
+- Add identity handover so duplicate identities replace stale ROUTER/SERVER/PEER routes.
 
 ## [0.1.0] - 2026-08-03
 

@@ -67,9 +67,10 @@ module OMQ
     end
   end
 
-  # SERVER (draft, ZeroMQ RFC 41): asynchronous reply socket. Assigns a
-  # 4-byte routing ID to each connected CLIENT; #receive surfaces the
-  # ID as the first frame, #send_to replies to a specific peer by ID.
+  # SERVER (draft, ZeroMQ RFC 41): asynchronous reply socket. Uses the
+  # CLIENT identity as the routing ID when present, otherwise assigns a
+  # 4-byte ID. #receive surfaces the ID as the first frame; #send_to
+  # replies to a specific peer by ID.
   class SERVER < Socket
     include QueueReadable
 

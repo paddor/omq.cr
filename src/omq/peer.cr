@@ -3,8 +3,9 @@ require "./routing/peer"
 
 module OMQ
   # PEER (draft, ZeroMQ RFC 51): bidirectional multi-peer socket.
-  # Each connected peer gets a 4-byte routing ID; #receive surfaces it
-  # as the first frame, #send_to addresses a specific peer.
+  # Each connected peer is addressed by its identity when present, or by
+  # a generated 4-byte routing ID. #receive surfaces it as the first
+  # frame; #send_to addresses a specific peer.
   class PEER < Socket
     include QueueReadable
 
