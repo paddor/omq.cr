@@ -177,6 +177,9 @@ They return `nil` or `false` instead of waiting for data or HWM space.
 `TERMINATE`, and `KILL` control commands; an optional capture socket receives
 best-effort copies.
 
+`socket.connections` returns live `ConnectionInfo` snapshots. Monitor events
+for accepted, connected, and disconnected pipes include the same info.
+
 `socket.wait_connected(min_peers, timeout)` waits for data-plane-ready peers.
 PUB/XPUB also expose `wait_subscribed(min_subscriptions, timeout)`.
 

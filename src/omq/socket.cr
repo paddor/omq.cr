@@ -21,8 +21,11 @@ module OMQ
     @bound_endpoints = [] of String
     @disabled_connect_endpoints = [] of String
     @pipe_endpoints = {} of Pipe => String
+    @connection_infos = {} of Pipe => ConnectionInfo
+    @connection_infos_by_id = {} of UInt64 => ConnectionInfo
     @pipes = [] of Pipe
     @pending_handshakes = 0
+    @next_connection_id = 1_u64
     @committed = false
     @state_mutex = Mutex.new
     @shutdown = Channel(Nil).new
@@ -239,6 +242,8 @@ module OMQ
         @bound_endpoints.clear
         @disabled_connect_endpoints.clear
         @pipe_endpoints.clear
+        @connection_infos.clear
+        @connection_infos_by_id.clear
         @pipes.clear
 
         {inproc_snapshot, tcp_snapshot, ipc_snapshot, udp_snapshot, pipe_snapshot}
@@ -277,11 +282,18 @@ module OMQ
       end
     end
 
-    private def emit_monitor(kind : MonitorEvent::Kind, endpoint : String, pipe : Pipe? = nil, error : Exception? = nil) : Nil
+    private def emit_monitor(
+      kind : MonitorEvent::Kind,
+      endpoint : String,
+      pipe : Pipe? = nil,
+      error : Exception? = nil,
+      connection : ConnectionInfo? = nil,
+    ) : Nil
       ch = @state_mutex.synchronize { @monitor }
       return unless ch
       return if ch.closed?
-      ev = MonitorEvent.new(kind, endpoint, pipe, error)
+      info = connection || pipe.try { |p| @state_mutex.synchronize { @connection_infos[p]? } }
+      ev = MonitorEvent.new(kind, endpoint, pipe, error, info)
       select
       when ch.send(ev)
       else
@@ -295,8 +307,10 @@ module OMQ
     private def supervise_pipe(pipe : Pipe, scheme : String, endpoint : String) : Nil
       pipe.await_closed
       return if closed?
-      return unless unregister_pipe(pipe)
-      emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe)
+      removed = unregister_pipe(pipe)
+      return unless removed
+      _removed_endpoint, info = removed
+      emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe, connection: info)
       return if connect_endpoint_disabled?(endpoint)
       connection_manager(scheme, endpoint, initial_delay: nil)
     end
@@ -320,8 +334,10 @@ module OMQ
         emit_monitor(MonitorEvent::Kind::Connected, endpoint, pipe)
         pipe.await_closed
         break unless connect_endpoint_enabled?(endpoint)
-        next unless unregister_pipe(pipe)
-        emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe)
+        removed = unregister_pipe(pipe)
+        next unless removed
+        _removed_endpoint, info = removed
+        emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe, connection: info)
         delay_hint = nil
       end
     end
@@ -456,6 +472,14 @@ module OMQ
     # that want to wait until a handshake has completed.
     def peer_count : Int32
       @state_mutex.synchronize { @pipes.count { |p| !p.closed? } }
+    end
+
+    def connections : Array(ConnectionInfo)
+      @state_mutex.synchronize { @connection_infos_by_id.values.sort_by(&.id) }
+    end
+
+    def connection_info(id : UInt64) : ConnectionInfo?
+      @state_mutex.synchronize { @connection_infos_by_id[id]? }
     end
 
     # Wait until at least `min_peers` pipes are ready for data-plane routing.
@@ -701,8 +725,19 @@ module OMQ
         if @closed || pipe.closed? || @disabled_connect_endpoints.includes?(endpoint)
           false
         else
+          info = ConnectionInfo.new(
+            id: @next_connection_id,
+            endpoint: endpoint,
+            socket_type: socket_type,
+            peer_identity: pipe.peer_identity,
+            peer_zmtp_minor: pipe.peer_zmtp_minor,
+            connected_at: Time.utc,
+          )
+          @next_connection_id += 1
           @pipes << pipe
           @pipe_endpoints[pipe] = endpoint
+          @connection_infos[pipe] = info
+          @connection_infos_by_id[info.id] = info
           true
         end
       end
@@ -715,10 +750,14 @@ module OMQ
       true
     end
 
-    private def unregister_pipe(pipe : Pipe) : String?
+    private def unregister_pipe(pipe : Pipe) : {String, ConnectionInfo?}?
       @state_mutex.synchronize do
+        endpoint = @pipe_endpoints.delete(pipe)
+        return nil unless endpoint
         @pipes.delete(pipe)
-        @pipe_endpoints.delete(pipe)
+        info = @connection_infos.delete(pipe)
+        @connection_infos_by_id.delete(info.id) if info
+        {endpoint, info}
       end
     end
 
@@ -741,10 +780,10 @@ module OMQ
     end
 
     private def close_pipes_at(endpoint : String) : Nil
-      pipes = detach_pipes_at(endpoint)
-      pipes.each do |pipe|
+      removed = detach_pipes_at(endpoint)
+      removed.each do |pipe, info|
         pipe.close
-        emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe)
+        emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe, connection: info)
       end
     end
 
@@ -811,14 +850,18 @@ module OMQ
       end
     end
 
-    private def detach_pipes_at(endpoint : String) : Array(Pipe)
+    private def detach_pipes_at(endpoint : String) : Array({Pipe, ConnectionInfo?})
       @state_mutex.synchronize do
         pipes = @pipes.select { |pipe| @pipe_endpoints[pipe]? == endpoint }
+        removed = [] of {Pipe, ConnectionInfo?}
         pipes.each do |pipe|
           @pipes.delete(pipe)
           @pipe_endpoints.delete(pipe)
+          info = @connection_infos.delete(pipe)
+          @connection_infos_by_id.delete(info.id) if info
+          removed << {pipe, info}
         end
-        pipes
+        removed
       end
     end
 
@@ -1029,8 +1072,10 @@ module OMQ
     private def watch_pipe_close(pipe : Pipe, endpoint : String) : Nil
       pipe.await_terminated
       return if closed?
-      return unless unregister_pipe(pipe)
-      emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe)
+      removed = unregister_pipe(pipe)
+      return unless removed
+      _removed_endpoint, info = removed
+      emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe, connection: info)
     end
 
     delegate send_hwm, recv_hwm, linger, identity,

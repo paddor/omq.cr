@@ -45,6 +45,35 @@ describe "Socket#monitor" do
     end
   end
 
+  it "exposes connection snapshots and attaches them to monitor events" do
+    OMQ::TestHelper.with_timeout(2.seconds) do
+      router = OMQ::ROUTER.new
+      events = router.monitor
+      router.bind("inproc://mon-conn-info")
+      dealer = OMQ::DEALER.connect("inproc://mon-conn-info", identity: "worker-1")
+
+      events.receive # Listening
+      accepted = events.receive
+
+      info = accepted.connection.not_nil!
+      assert_equal OMQ::MonitorEvent::Kind::Accepted, accepted.kind
+      assert_equal "inproc://mon-conn-info", info.endpoint
+      assert_equal "ROUTER", info.socket_type
+      assert_equal "worker-1", String.new(info.peer_identity)
+      assert_equal OMQ::ZMTP::MINOR_VERSION, info.peer_zmtp_minor
+      refute_nil router.connection_info(info.id)
+      assert_equal [info.id], router.connections.map(&.id)
+
+      dealer.close
+      disconnected = events.receive
+      assert_equal OMQ::MonitorEvent::Kind::Disconnected, disconnected.kind
+      assert_equal info.id, disconnected.connection.not_nil!.id
+      assert_nil router.connection_info(info.id)
+
+      router.close
+    end
+  end
+
   it "emits Disconnected on the inproc bind side when peer closes" do
     OMQ::TestHelper.with_timeout(2.seconds) do
       pull = OMQ::PULL.new
