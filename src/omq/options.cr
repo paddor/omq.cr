@@ -36,6 +36,8 @@ module OMQ
     property heartbeat_interval : Time::Span? = nil
     property heartbeat_ttl : Time::Span? = nil
     property heartbeat_timeout : Time::Span? = nil
+    property handshake_timeout : Time::Span? = 30.seconds
+    @max_pending_handshakes : Int32 = 1024
 
     property max_message_size : Int64? = nil
 
@@ -90,6 +92,15 @@ module OMQ
     def self.channel_capacity(hwm : Int32) : Int32
       raise ArgumentError.new("hwm must be >= 0 (got #{hwm})") if hwm < 0
       hwm == 0 ? UNBOUNDED_HWM_CAPACITY : hwm
+    end
+
+    def max_pending_handshakes : Int32
+      @max_pending_handshakes
+    end
+
+    def max_pending_handshakes=(val : Int32)
+      raise ArgumentError.new("max_pending_handshakes must be >= 0 (got #{val})") if val < 0
+      @max_pending_handshakes = val
     end
 
     def recv_timeout=(val : Time::Span?)

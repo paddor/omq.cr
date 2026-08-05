@@ -22,6 +22,7 @@ module OMQ
     @disabled_connect_endpoints = [] of String
     @pipe_endpoints = {} of Pipe => String
     @pipes = [] of Pipe
+    @pending_handshakes = 0
     @committed = false
     @state_mutex = Mutex.new
     @shutdown = Channel(Nil).new
@@ -338,8 +339,50 @@ module OMQ
             rcvbuf: @options.rcvbuf,
           )
         else
-          Transport::TCP.adopt(
+          with_handshake_timeout(tcp) do
+            Transport::TCP.adopt(
+              tcp,
+              local_socket_type: socket_type,
+              local_identity: @options.identity,
+              as_server: false,
+              send_capacity: @options.send_capacity,
+              recv_capacity: @options.recv_capacity,
+              mechanism: @options.mechanism,
+              max_message_size: @options.max_message_size,
+              heartbeat_interval: @options.heartbeat_interval,
+              heartbeat_ttl: @options.heartbeat_ttl,
+              heartbeat_timeout: @options.heartbeat_timeout,
+              sndbuf: @options.sndbuf,
+              rcvbuf: @options.rcvbuf,
+            )
+          end
+        end
+      when "lz4+tcp"
+        tcp = Transport::Lz4Tcp.connect(endpoint)
+        with_handshake_timeout(tcp) do
+          Transport::Lz4Tcp.adopt(
             tcp,
+            local_socket_type: socket_type,
+            local_identity: @options.identity,
+            as_server: false,
+            send_capacity: @options.send_capacity,
+            recv_capacity: @options.recv_capacity,
+            mechanism: @options.mechanism,
+            max_message_size: @options.max_message_size,
+            heartbeat_interval: @options.heartbeat_interval,
+            heartbeat_ttl: @options.heartbeat_ttl,
+            heartbeat_timeout: @options.heartbeat_timeout,
+            sndbuf: @options.sndbuf,
+            rcvbuf: @options.rcvbuf,
+            lz4_dict: @options.lz4_dict,
+            auto_dict: @options.lz4_auto_dict,
+          )
+        end
+      when "ipc"
+        unix = Transport::IPC.connect(endpoint)
+        with_handshake_timeout(unix) do
+          Transport::IPC.adopt(
+            unix,
             local_socket_type: socket_type,
             local_identity: @options.identity,
             as_server: false,
@@ -354,42 +397,6 @@ module OMQ
             rcvbuf: @options.rcvbuf,
           )
         end
-      when "lz4+tcp"
-        tcp = Transport::Lz4Tcp.connect(endpoint)
-        Transport::Lz4Tcp.adopt(
-          tcp,
-          local_socket_type: socket_type,
-          local_identity: @options.identity,
-          as_server: false,
-          send_capacity: @options.send_capacity,
-          recv_capacity: @options.recv_capacity,
-          mechanism: @options.mechanism,
-          max_message_size: @options.max_message_size,
-          heartbeat_interval: @options.heartbeat_interval,
-          heartbeat_ttl: @options.heartbeat_ttl,
-          heartbeat_timeout: @options.heartbeat_timeout,
-          sndbuf: @options.sndbuf,
-          rcvbuf: @options.rcvbuf,
-          lz4_dict: @options.lz4_dict,
-          auto_dict: @options.lz4_auto_dict,
-        )
-      when "ipc"
-        unix = Transport::IPC.connect(endpoint)
-        Transport::IPC.adopt(
-          unix,
-          local_socket_type: socket_type,
-          local_identity: @options.identity,
-          as_server: false,
-          send_capacity: @options.send_capacity,
-          recv_capacity: @options.recv_capacity,
-          mechanism: @options.mechanism,
-          max_message_size: @options.max_message_size,
-          heartbeat_interval: @options.heartbeat_interval,
-          heartbeat_ttl: @options.heartbeat_ttl,
-          heartbeat_timeout: @options.heartbeat_timeout,
-          sndbuf: @options.sndbuf,
-          rcvbuf: @options.rcvbuf,
-        )
       else
         raise UnsupportedTransport.new(scheme)
       end
@@ -526,6 +533,8 @@ module OMQ
       heartbeat_interval : Time::Span? = nil,
       heartbeat_ttl : Time::Span? = nil,
       heartbeat_timeout : Time::Span? = nil,
+      handshake_timeout : Time::Span? = nil,
+      max_pending_handshakes : Int32? = nil,
       max_message_size : Int64? = nil,
       sndbuf : Int32? = nil,
       rcvbuf : Int32? = nil,
@@ -549,6 +558,8 @@ module OMQ
       @options.heartbeat_interval = heartbeat_interval if heartbeat_interval
       @options.heartbeat_ttl = heartbeat_ttl if heartbeat_ttl
       @options.heartbeat_timeout = heartbeat_timeout if heartbeat_timeout
+      @options.handshake_timeout = handshake_timeout if handshake_timeout
+      @options.max_pending_handshakes = max_pending_handshakes if max_pending_handshakes
       @options.max_message_size = max_message_size if max_message_size
       @options.sndbuf = sndbuf if sndbuf
       @options.rcvbuf = rcvbuf if rcvbuf
@@ -606,6 +617,63 @@ module OMQ
       return unless stream_socket?
       return if scheme == "tcp"
       raise UnsupportedTransport.new("STREAM sockets only support tcp:// endpoints")
+    end
+
+    private def with_handshake_timeout(io : IO, &block : -> Pipe) : Pipe
+      span = @options.handshake_timeout
+      return block.call unless span
+
+      result = Channel(Pipe | Exception).new(1)
+      spawn do
+        begin
+          pipe = block.call
+          result.send(pipe)
+        rescue ex
+          result.send(ex)
+        end
+      end
+
+      select
+      when outcome = result.receive
+        case outcome
+        when Pipe
+          outcome
+        when Exception
+          raise outcome
+        else
+          raise ClosedError.new("handshake worker closed")
+        end
+      when timeout(span)
+        io.close rescue nil
+        spawn close_late_handshake_result(result)
+        raise IO::TimeoutError.new("handshake timed out after #{span}")
+      end
+    end
+
+    private def close_late_handshake_result(result : Channel(Pipe | Exception)) : Nil
+      if outcome = result.receive?
+        outcome.close if outcome.is_a?(Pipe)
+      end
+    rescue Channel::ClosedError
+    end
+
+    private def try_acquire_pending_handshake? : Bool
+      @state_mutex.synchronize do
+        return false if @closed || @pending_handshakes >= @options.max_pending_handshakes
+        @pending_handshakes += 1
+        true
+      end
+    end
+
+    private def release_pending_handshake : Nil
+      @state_mutex.synchronize do
+        @pending_handshakes -= 1 if @pending_handshakes > 0
+      end
+    end
+
+    private def reject_pending_handshake(io : IO, endpoint : String) : Nil
+      io.close rescue nil
+      emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: Error.new("max pending handshakes reached"))
     end
 
     private def register_pipe(pipe : Pipe, endpoint : String) : Bool
@@ -785,8 +853,18 @@ module OMQ
         tcp = listener.accept
         break unless tcp
         break if closed?
-        begin
-          pipe = Transport::TCP.adopt(
+        unless try_acquire_pending_handshake?
+          reject_pending_handshake(tcp, endpoint)
+          next
+        end
+        spawn handle_tcp_accept(tcp, endpoint)
+      end
+    end
+
+    private def handle_tcp_accept(tcp : TCPSocket, endpoint : String) : Nil
+      begin
+        pipe = with_handshake_timeout(tcp) do
+          Transport::TCP.adopt(
             tcp,
             local_socket_type: socket_type,
             local_identity: @options.identity,
@@ -801,14 +879,16 @@ module OMQ
             sndbuf: @options.sndbuf,
             rcvbuf: @options.rcvbuf,
           )
-          if register_pipe(pipe, endpoint)
-            emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
-            spawn watch_pipe_close(pipe, endpoint)
-          end
-        rescue err : IO::Error | ProtocolError
-          tcp.close rescue nil
-          emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err)
         end
+        if register_pipe(pipe, endpoint)
+          emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
+          spawn watch_pipe_close(pipe, endpoint)
+        end
+      rescue err : IO::Error | ProtocolError
+        tcp.close rescue nil
+        emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err)
+      ensure
+        release_pending_handshake
       end
     end
 
@@ -841,8 +921,18 @@ module OMQ
         tcp = listener.accept
         break unless tcp
         break if closed?
-        begin
-          pipe = Transport::Lz4Tcp.adopt(
+        unless try_acquire_pending_handshake?
+          reject_pending_handshake(tcp, endpoint)
+          next
+        end
+        spawn handle_lz4_tcp_accept(tcp, endpoint)
+      end
+    end
+
+    private def handle_lz4_tcp_accept(tcp : TCPSocket, endpoint : String) : Nil
+      begin
+        pipe = with_handshake_timeout(tcp) do
+          Transport::Lz4Tcp.adopt(
             tcp,
             local_socket_type: socket_type,
             local_identity: @options.identity,
@@ -859,14 +949,16 @@ module OMQ
             lz4_dict: @options.lz4_dict,
             auto_dict: @options.lz4_auto_dict,
           )
-          if register_pipe(pipe, endpoint)
-            emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
-            spawn watch_pipe_close(pipe, endpoint)
-          end
-        rescue err : IO::Error | ProtocolError
-          tcp.close rescue nil
-          emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err)
         end
+        if register_pipe(pipe, endpoint)
+          emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
+          spawn watch_pipe_close(pipe, endpoint)
+        end
+      rescue err : IO::Error | ProtocolError
+        tcp.close rescue nil
+        emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err)
+      ensure
+        release_pending_handshake
       end
     end
 
@@ -875,8 +967,18 @@ module OMQ
         unix = listener.accept
         break unless unix
         break if closed?
-        begin
-          pipe = Transport::IPC.adopt(
+        unless try_acquire_pending_handshake?
+          reject_pending_handshake(unix, endpoint)
+          next
+        end
+        spawn handle_ipc_accept(unix, endpoint)
+      end
+    end
+
+    private def handle_ipc_accept(unix : UNIXSocket, endpoint : String) : Nil
+      begin
+        pipe = with_handshake_timeout(unix) do
+          Transport::IPC.adopt(
             unix,
             local_socket_type: socket_type,
             local_identity: @options.identity,
@@ -891,14 +993,16 @@ module OMQ
             sndbuf: @options.sndbuf,
             rcvbuf: @options.rcvbuf,
           )
-          if register_pipe(pipe, endpoint)
-            emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
-            spawn watch_pipe_close(pipe, endpoint)
-          end
-        rescue err : IO::Error | ProtocolError
-          unix.close rescue nil
-          emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err)
         end
+        if register_pipe(pipe, endpoint)
+          emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
+          spawn watch_pipe_close(pipe, endpoint)
+        end
+      rescue err : IO::Error | ProtocolError
+        unix.close rescue nil
+        emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err)
+      ensure
+        release_pending_handshake
       end
     end
 
@@ -912,14 +1016,16 @@ module OMQ
     delegate send_hwm, recv_hwm, linger, identity,
       read_timeout, write_timeout, recv_timeout, send_timeout,
       reconnect_interval, heartbeat_interval, heartbeat_ttl, heartbeat_timeout,
-      max_message_size, sndbuf, rcvbuf, on_mute, conflate, mechanism,
+      handshake_timeout, max_pending_handshakes, max_message_size, sndbuf, rcvbuf,
+      on_mute, conflate, mechanism,
       router_mandatory?, lz4_dict, dict, lz4_auto_dict, auto_dict, to: @options
 
     {% for m in %w(send_hwm recv_hwm linger identity read_timeout write_timeout
                   recv_timeout send_timeout reconnect_interval heartbeat_interval
-                  heartbeat_ttl heartbeat_timeout max_message_size sndbuf rcvbuf
-                  on_mute conflate mechanism router_mandatory lz4_dict dict
-                  lz4_auto_dict auto_dict) %}
+                  heartbeat_ttl heartbeat_timeout handshake_timeout
+                  max_pending_handshakes max_message_size sndbuf rcvbuf on_mute
+                  conflate mechanism router_mandatory lz4_dict dict lz4_auto_dict
+                  auto_dict) %}
       def {{m.id}}=(val)
         @options.{{m.id}} = val
       end

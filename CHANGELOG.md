@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Add `STREAM` sockets over raw `tcp://` connections.
 - Add `Socket#wait_connected` and PUB/XPUB `#wait_subscribed` readiness helpers.
 - Make receive-side `conflate` keep only the latest queued message.
+- Add handshake timeouts, a pending-handshake cap, and concurrent accept handshakes.
 
 ## [0.1.0] - 2026-08-03
 

@@ -189,6 +189,8 @@ PUB/XPUB also expose `wait_subscribed(min_subscriptions, timeout)`.
 | `read_timeout` / `write_timeout` | `nil` | Raise `IO::TimeoutError` after this span |
 | `reconnect_interval` | `100.milliseconds` | Fixed span, or `Range(Time::Span, Time::Span)` for exponential backoff |
 | `heartbeat_interval` / `heartbeat_ttl` / `heartbeat_timeout` | `nil` | ZMTP PING/PONG keepalive + silent-peer watchdog |
+| `handshake_timeout` | `30.seconds` | Max time for a ZMTP handshake before the transport is closed |
+| `max_pending_handshakes` | `1024` | Max accepted TCP/IPC peers allowed to sit in handshake state |
 | `max_message_size` | `nil` | Drop the connection if a frame exceeds this many bytes; for `lz4+tcp://`, this applies to total decompressed message size |
 | `sndbuf` / `rcvbuf` | `nil` | Kernel socket buffer sizes (TCP/IPC only) |
 | `dict` / `lz4_dict` | `nil` | Send-side LZ4 dictionary for `lz4+tcp://`; 1-8192 bytes |
