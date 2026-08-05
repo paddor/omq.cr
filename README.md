@@ -1,4 +1,4 @@
-# ØMQ — ZeroMQ for Crystal, no C required
+# ØMQ - ZeroMQ for Crystal, no C required
 
 [![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](LICENSE)
 [![Crystal](https://img.shields.io/badge/Crystal-%3E%3D%201.21-000000?logo=crystal&logoColor=white)](https://crystal-lang.org)
@@ -7,41 +7,41 @@
 >
 > **0.5 µs** inproc round-trip | **9.4 µs** ipc | **12 µs** tcp
 >
-> Crystal 1.21 on a Linux VM, 128-byte payloads — see [`bench/`](bench/) for
+> Crystal 1.21 on a Linux VM, 128-byte payloads. See [`bench/`](bench/) for
 > the full sweep
 
 Add `omq` to your `shard.yml` and you're done. No libzmq, no FFI, no system
-packages — just Crystal talking to every other ZeroMQ peer out there.
+packages. Just Crystal talking to every other ZeroMQ peer out there.
 
-ØMQ gives your Crystal processes a way to talk to each other — and to
-anything else speaking ZeroMQ — without a broker in the middle. The same
+ØMQ gives your Crystal processes a way to talk to each other and to
+anything else speaking ZeroMQ without a broker in the middle. The same
 API works whether they live in the same process, on the same machine, or
 across the network. Reconnects, queuing, and back-pressure are handled for
 you; you write the interesting part.
 
 This is the Crystal sibling of the pure-Ruby [omq](https://github.com/zeromq/omq)
 gem. Same wire protocol (ZMTP 3.1, with 3.0 peer compat), same socket-type lineup, same bind/connect
-semantics — ported to Crystal's fiber scheduler and libevent-backed event
+semantics. Ported to Crystal's fiber scheduler and libevent-backed event
 loop.
 
 ## Highlights
 
-- **Zero dependencies on C** — no FFI, no libzmq, no extensions. `shards
+- **Zero dependencies on C**: no FFI, no libzmq, no extensions. `shards
   install` just works everywhere Crystal runs
-- **Fast** — Crystal-native `Channel` queues, direct-pipe inproc bypass,
+- **Fast**: Crystal-native `Channel` queues, direct-pipe inproc bypass,
   `TCP_NODELAY` on connect, work-stealing send pumps
-- **No context object** — sockets are standalone; the Crystal runtime's
+- **No context object**: sockets are standalone; the Crystal runtime's
   fiber scheduler is the "context"
-- **Every standard socket type** — REQ/REP, PUB/SUB, XPUB/XSUB, PUSH/PULL,
+- **Every standard socket type**: REQ/REP, PUB/SUB, XPUB/XSUB, PUSH/PULL,
   DEALER/ROUTER, PAIR
-- **Every transport** — `tcp://`, `udp://`, `lz4+tcp://`, `ipc://` (Unix domain
-  sockets, abstract namespace via leading `@`), `inproc://` (in-process
-  channel pairs)
-- **Security mechanisms** — NULL by default, PLAIN username/password auth,
+- **Every transport**: `tcp://`, `udp://`, `lz4+tcp://`, `zstd+tcp://`,
+  `ipc://` (Unix domain sockets, abstract namespace via leading `@`),
+  `inproc://` (in-process channel pairs)
+- **Security mechanisms**: NULL by default, PLAIN username/password auth,
   CURVE encryption via `require "omq/curve"`
-- **Wire-compatible** — interoperates with libzmq, pyzmq, CZMQ, JeroMQ,
-  and the Ruby `omq` gem over TCP and IPC
-- **Bind/connect order doesn't matter** — connect before bind, bind before
+- **Wire-compatible**: interoperates with libzmq, pyzmq, CZMQ, JeroMQ,
+  and the Ruby `omq`, `omq-lz4`, and `omq-zstd` gems
+- **Bind/connect order doesn't matter**: connect before bind, bind before
   connect, peers come and go. Reconnect is automatic; buffered messages
   flush when a peer arrives
 
@@ -104,7 +104,7 @@ pp pull.receive.map { |p| String.new(p) }
 
 ### TCP
 
-Same API, just swap the endpoint — ephemeral ports via `:0`:
+Same API, just swap the endpoint. Ephemeral ports via `:0`:
 
 ```crystal
 pull = OMQ::PULL.new
@@ -140,6 +140,30 @@ dict = File.read("schema.dict").to_slice
 push.connect("lz4+tcp://127.0.0.1:5555", dict: dict)
 
 push.connect("lz4+tcp://127.0.0.1:5556", auto_dict: true)
+```
+
+### Zstd TCP
+
+Use `zstd+tcp://` for larger repeated payloads or when Zstd dictionaries are
+already part of your wire contract. Handshake and ZMTP commands stay raw.
+Data frames use the Ruby `omq-zstd` envelope.
+
+```crystal
+pull = OMQ::PULL.bind("zstd+tcp://127.0.0.1:0")
+push = OMQ::PUSH.connect("zstd+tcp://127.0.0.1:#{pull.port}")
+
+push.send("hello, zstd world")
+pp pull.receive
+```
+
+Send-side ZDICT dictionaries are shipped once per direction on each
+connection. `zstd_auto_dict: true` trains from early outgoing messages.
+
+```crystal
+dict = File.read("schema.zdict").to_slice
+push.connect("zstd+tcp://127.0.0.1:5555", zstd_dict: dict, zstd_level: 6)
+
+push.connect("zstd+tcp://127.0.0.1:5556", zstd_auto_dict: {capacity: 2048, max_samples: 50})
 ```
 
 ## Socket types
@@ -185,9 +209,9 @@ PUB/XPUB also expose `wait_subscribed(min_subscriptions, timeout)`.
 
 ### Endpoint prefix convention
 
-- `"@tcp://…"` — bind
-- `">tcp://…"` — connect
-- plain `"tcp://…"` — use the socket-type default (`PUSH`→connect,
+- `"@tcp://…"`: bind
+- `">tcp://…"`: connect
+- plain `"tcp://…"`: use the socket-type default (`PUSH`→connect,
   `PULL`→bind, `PUB`→bind, `SUB`→connect, …)
 
 ## Options
@@ -202,10 +226,13 @@ PUB/XPUB also expose `wait_subscribed(min_subscriptions, timeout)`.
 | `heartbeat_interval` / `heartbeat_ttl` / `heartbeat_timeout` | `nil` | ZMTP PING/PONG keepalive + silent-peer watchdog |
 | `handshake_timeout` | `30.seconds` | Max time for a ZMTP handshake before the transport is closed |
 | `max_pending_handshakes` | `1024` | Max accepted TCP/IPC peers allowed to sit in handshake state |
-| `max_message_size` | `nil` | Drop the connection if a frame exceeds this many bytes; for `lz4+tcp://`, this applies to total decompressed message size |
+| `max_message_size` | `nil` | Drop the connection if a frame exceeds this many bytes; for `lz4+tcp://` and `zstd+tcp://`, this applies to total decompressed message size |
 | `sndbuf` / `rcvbuf` | `nil` | Kernel socket buffer sizes (TCP/IPC only) |
 | `dict` / `lz4_dict` | `nil` | Send-side LZ4 dictionary for `lz4+tcp://`; 1-8192 bytes |
 | `auto_dict` | `nil` | Enable send-side automatic LZ4 dictionary training for `lz4+tcp://`; `true` uses 2 KiB capacity and 100-message trigger |
+| `zstd_level` / `level` | `-3` | Send-side Zstd compression level for `zstd+tcp://` |
+| `zstd_dict` | `nil` | Send-side ZDICT dictionary for `zstd+tcp://`; must be a trained ZDICT blob, 1-8192 bytes |
+| `zstd_auto_dict` | `nil` | Enable send-side automatic ZDICT training for `zstd+tcp://`; `true` uses 2 KiB capacity and 1000 samples |
 | `conflate` | `false` | Keep only the latest queued message where message order carries no envelope state |
 | `on_mute` | `:block`; PUB/XPUB use `:drop_newest` | `:block`, `:drop_newest`, `:drop_oldest` |
 
@@ -229,11 +256,11 @@ comparison.
 
 ## Status
 
-Pre-1.0. All 12 standard socket types work, inproc/ipc/tcp/udp/lz4+tcp all
-work, heartbeat/linger/reconnect/HWM/on_mute/conflate/max_message_size/sndbuf/rcvbuf
+Pre-1.0. All 12 standard socket types work, inproc/ipc/tcp/udp/lz4+tcp/zstd+tcp
+all work, heartbeat/linger/reconnect/HWM/on_mute/conflate/max_message_size/sndbuf/rcvbuf
 are wired through. PLAIN auth, draft socket types (CLIENT/SERVER,
 RADIO/DISH, SCATTER/GATHER, PEER, CHANNEL, STREAM), CURVE encryption (opt-in via
-`require "omq/curve"`), and the monitor-event API all work — see
+`require "omq/curve"`), and the monitor-event API all work. See
 [`CHANGELOG.md`](CHANGELOG.md).
 
 ## PLAIN authentication
@@ -260,25 +287,26 @@ libsodium wrapper. Add it to your shard.yml alongside `omq`, then:
 require "omq"
 require "omq/curve"
 
-server_sk = Natron::PrivateKey.generate
-server_pk = server_sk.public_key
+server_keys = OMQ::Curve::KeyPair.generate
+client_keys = OMQ::Curve::KeyPair.generate
 
 rep = OMQ::REP.new
 rep.mechanism = OMQ::ZMTP::Mechanism::Curve.server(
-  public_key: server_pk.bytes, secret_key: server_sk.bytes)
+  public_key: server_keys.public_key,
+  secret_key: server_keys.secret_key)
 rep.bind("tcp://127.0.0.1:5555")
 
-client_sk = Natron::PrivateKey.generate
 req = OMQ::REQ.new
 req.mechanism = OMQ::ZMTP::Mechanism::Curve.client(
-  server_key: server_pk.bytes,
-  public_key: client_sk.public_key.bytes,
-  secret_key: client_sk.bytes)
+  server_key: server_keys.public_z85,
+  public_key: client_keys.public_z85,
+  secret_key: client_keys.secret_z85)
 req.connect("tcp://127.0.0.1:5555")
 ```
 
 Pass an authenticator proc to the server factory to whitelist client
-public keys.
+public keys. Peer authenticators receive `public_key`, `public_z85`,
+`identity`, and `peer_address`.
 
 ## Development
 
@@ -288,7 +316,7 @@ crystal run test/run.cr
 ```
 
 The full suite runs in ~2 seconds. Add a new test file under
-`test/omq/*_test.cr` — `test/run.cr` auto-discovers everything.
+`test/omq/*_test.cr`. `test/run.cr` auto-discovers everything.
 
 ## License
 
