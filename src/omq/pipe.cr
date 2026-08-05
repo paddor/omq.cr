@@ -16,6 +16,8 @@ module OMQ
     # via the connector's options.identity for inproc). Empty means the
     # peer didn't advertise one; ROUTER will substitute a random ID.
     property peer_identity : Bytes = Bytes.empty
+    # Connectionless RADIO/UDP sends every datagram; DISH filters locally.
+    property? radio_broadcast_all : Bool = false
 
     # ZMTP minor version the peer advertised (0 = 3.0, 1 = 3.1). Inproc
     # pipes don't do a wire handshake and default to 3.1 semantics.

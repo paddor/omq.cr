@@ -17,6 +17,7 @@ module OMQ
     @inproc_names = [] of String
     @tcp_listeners = [] of Transport::TCP::Listener
     @ipc_listeners = [] of Transport::IPC::Listener
+    @udp_listeners = [] of Transport::UDP::Listener
     @bound_endpoints = [] of String
     @disabled_connect_endpoints = [] of String
     @pipe_endpoints = {} of Pipe => String
@@ -112,6 +113,24 @@ module OMQ
         end
         emit_monitor(MonitorEvent::Kind::Listening, endpoint)
         spawn accept_ipc(listener, endpoint)
+      when "udp"
+        raise UnsupportedTransport.new("udp bind requires DISH") unless socket_type == "DISH"
+        listener = Transport::UDP.bind(endpoint)
+        begin
+          track_udp_listener(listener)
+        rescue ex : ClosedError
+          listener.close
+          raise ex
+        end
+        emit_monitor(MonitorEvent::Kind::Listening, listener.endpoint)
+        pipe = Transport::UDP.adopt_receiver(
+          listener.socket,
+          send_capacity: @options.send_capacity,
+          recv_capacity: @options.recv_capacity,
+        )
+        if register_pipe(pipe, listener.endpoint)
+          spawn watch_pipe_close(pipe, listener.endpoint)
+        end
       else
         raise UnsupportedTransport.new(scheme)
       end
@@ -144,6 +163,18 @@ module OMQ
           emit_monitor(MonitorEvent::Kind::ConnectDelayed, endpoint, error: err)
           spawn connection_manager(scheme, endpoint, initial_delay: nil)
         end
+      when "udp"
+        raise UnsupportedTransport.new("udp connect requires RADIO") unless socket_type == "RADIO"
+        socket = Transport::UDP.connect(endpoint)
+        pipe = Transport::UDP.adopt_sender(
+          socket,
+          send_capacity: @options.send_capacity,
+          recv_capacity: @options.recv_capacity,
+        )
+        if register_pipe(pipe, endpoint)
+          emit_monitor(MonitorEvent::Kind::Connected, endpoint, pipe)
+          spawn watch_pipe_close(pipe, endpoint)
+        end
       else
         raise UnsupportedTransport.new(scheme)
       end
@@ -168,6 +199,8 @@ module OMQ
         close_matching_tcp_listeners(endpoint)
       when "ipc"
         close_matching_ipc_listeners(endpoint)
+      when "udp"
+        close_matching_udp_listeners(endpoint)
       else
         raise UnsupportedTransport.new(scheme)
       end
@@ -181,7 +214,7 @@ module OMQ
     end
 
     def close : Nil
-      inproc_names, tcp_listeners, ipc_listeners, pipes = @state_mutex.synchronize do
+      inproc_names, tcp_listeners, ipc_listeners, udp_listeners, pipes = @state_mutex.synchronize do
         return if @closed
         @closed = true
         @shutdown.close unless @shutdown.closed?
@@ -189,22 +222,25 @@ module OMQ
         inproc_snapshot = @inproc_names.dup
         tcp_snapshot = @tcp_listeners.dup
         ipc_snapshot = @ipc_listeners.dup
+        udp_snapshot = @udp_listeners.dup
         pipe_snapshot = @pipes.dup
 
         @inproc_names.clear
         @tcp_listeners.clear
         @ipc_listeners.clear
+        @udp_listeners.clear
         @bound_endpoints.clear
         @disabled_connect_endpoints.clear
         @pipe_endpoints.clear
         @pipes.clear
 
-        {inproc_snapshot, tcp_snapshot, ipc_snapshot, pipe_snapshot}
+        {inproc_snapshot, tcp_snapshot, ipc_snapshot, udp_snapshot, pipe_snapshot}
       end
 
       inproc_names.each { |n| Transport::Inproc.unbind(n) }
       tcp_listeners.each(&.close)
       ipc_listeners.each(&.close)
+      udp_listeners.each(&.close)
       drain_for_linger(@options.linger, pipes)
       pipes.each(&.close)
       emit_monitor(MonitorEvent::Kind::Closed, "")
@@ -388,9 +424,9 @@ module OMQ
       left.positive? ? left : 0.seconds
     end
 
-    # Last-bound TCP port, or `nil` if not bound over TCP.
+    # Last-bound TCP/UDP port, or `nil` if not bound over either.
     def port : Int32?
-      @state_mutex.synchronize { @tcp_listeners.first?.try(&.port) }
+      @state_mutex.synchronize { @tcp_listeners.first?.try(&.port) || @udp_listeners.first?.try(&.port) }
     end
 
     # Number of live pipes — a rough peer count useful for benches and tests
@@ -622,6 +658,23 @@ module OMQ
       end
     end
 
+    private def close_matching_udp_listeners(endpoint : String) : Nil
+      _scheme, rest = parse_endpoint(endpoint)
+      _group, _host, port = Transport::UDP.parse_authority(rest)
+      listeners = @state_mutex.synchronize do
+        matches = @udp_listeners.select { |listener| listener.endpoint == endpoint || listener.port == port }
+        matches.each do |listener|
+          @udp_listeners.delete(listener)
+          @bound_endpoints.delete(listener.endpoint)
+        end
+        matches
+      end
+      listeners.each do |listener|
+        listener.close
+        close_pipes_at(listener.endpoint)
+      end
+    end
+
     private def detach_pipes_at(endpoint : String) : Array(Pipe)
       @state_mutex.synchronize do
         pipes = @pipes.select { |pipe| @pipe_endpoints[pipe]? == endpoint }
@@ -653,6 +706,14 @@ module OMQ
       @state_mutex.synchronize do
         raise ClosedError.new("socket closed") if @closed
         @ipc_listeners << listener
+        @bound_endpoints << listener.endpoint
+      end
+    end
+
+    private def track_udp_listener(listener : Transport::UDP::Listener) : Nil
+      @state_mutex.synchronize do
+        raise ClosedError.new("socket closed") if @closed
+        @udp_listeners << listener
         @bound_endpoints << listener.endpoint
       end
     end

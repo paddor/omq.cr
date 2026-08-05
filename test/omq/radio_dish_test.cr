@@ -70,3 +70,53 @@ describe "RADIO/DISH over inproc" do
     assert radio.subscriber_joined.closed?
   end
 end
+
+describe "RADIO/DISH over UDP" do
+  it "delivers matching groups" do
+    OMQ::TestHelper.with_timeout(3.seconds) do
+      dish = OMQ::DISH.bind("udp://127.0.0.1:0")
+      dish.join("weather")
+      port = dish.port.not_nil!
+
+      radio = OMQ::RADIO.connect("udp://127.0.0.1:#{port}")
+      radio.publish("weather", "sunny")
+
+      msg = dish.receive
+      assert_equal "weather", String.new(msg[0])
+      assert_equal "sunny", String.new(msg[1])
+
+      radio.close
+      dish.close
+    end
+  end
+
+  it "filters unjoined groups locally" do
+    OMQ::TestHelper.with_timeout(3.seconds) do
+      dish = OMQ::DISH.bind("udp://127.0.0.1:0", read_timeout: 150.milliseconds)
+      dish.join("weather")
+      port = dish.port.not_nil!
+
+      radio = OMQ::RADIO.connect("udp://127.0.0.1:#{port}")
+      radio.publish("news", "ignored")
+      radio.publish("weather", "rain")
+
+      msg = dish.receive
+      assert_equal "weather", String.new(msg[0])
+      assert_equal "rain", String.new(msg[1])
+      assert_raises(IO::TimeoutError) { dish.receive }
+
+      radio.close
+      dish.close
+    end
+  end
+
+  it "rejects the wrong UDP roles" do
+    assert_raises(OMQ::UnsupportedTransport) do
+      OMQ::RADIO.bind("udp://127.0.0.1:0")
+    end
+
+    assert_raises(OMQ::UnsupportedTransport) do
+      OMQ::DISH.connect("udp://127.0.0.1:9")
+    end
+  end
+end

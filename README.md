@@ -34,7 +34,7 @@ loop.
   fiber scheduler is the "context"
 - **Every standard socket type** — REQ/REP, PUB/SUB, XPUB/XSUB, PUSH/PULL,
   DEALER/ROUTER, PAIR
-- **Every transport** — `tcp://`, `lz4+tcp://`, `ipc://` (Unix domain
+- **Every transport** — `tcp://`, `udp://`, `lz4+tcp://`, `ipc://` (Unix domain
   sockets, abstract namespace via leading `@`), `inproc://` (in-process
   channel pairs)
 - **Security mechanisms** — NULL by default, PLAIN username/password auth,
@@ -212,8 +212,8 @@ comparison.
 
 ## Status
 
-Pre-1.0. All 12 standard socket types work, inproc/ipc/tcp/lz4+tcp all work,
-heartbeat/linger/reconnect/HWM/on_mute/conflate/max_message_size/sndbuf/rcvbuf
+Pre-1.0. All 12 standard socket types work, inproc/ipc/tcp/udp/lz4+tcp all
+work, heartbeat/linger/reconnect/HWM/on_mute/conflate/max_message_size/sndbuf/rcvbuf
 are wired through. PLAIN auth, draft socket types (CLIENT/SERVER,
 RADIO/DISH, SCATTER/GATHER, PEER, CHANNEL), CURVE encryption (opt-in via
 `require "omq/curve"`), and the monitor-event API all work — see

@@ -10,6 +10,7 @@ module OMQ
         @tx = ::Channel(Message).new(capacity)
         @subscriber_joined = ::Channel(Pipe).new(128)
         @pipes = [] of Pipe
+        @broadcast_pipes = [] of Pipe
         @pipes_mutex = Mutex.new
         @groups = {} of Pipe => Set(String)
         @groups_mutex = Mutex.new
@@ -26,7 +27,11 @@ module OMQ
         return if closed?
         @pipes_mutex.synchronize do
           @pipes << pipe
-          @groups_mutex.synchronize { @groups[pipe] = Set(String).new }
+          if pipe.radio_broadcast_all?
+            @broadcast_pipes << pipe
+          else
+            @groups_mutex.synchronize { @groups[pipe] = Set(String).new }
+          end
         end
         spawn command_listener(pipe)
       end
@@ -68,11 +73,15 @@ module OMQ
       end
 
       private def joined?(pipe : Pipe, group : String) : Bool
+        return true if @pipes_mutex.synchronize { @broadcast_pipes.includes?(pipe) }
         @groups_mutex.synchronize { @groups[pipe]?.try(&.includes?(group)) || false }
       end
 
       private def remove_pipe(pipe : Pipe) : Nil
-        @pipes_mutex.synchronize { @pipes.delete(pipe) }
+        @pipes_mutex.synchronize do
+          @pipes.delete(pipe)
+          @broadcast_pipes.delete(pipe)
+        end
         @groups_mutex.synchronize { @groups.delete(pipe) }
       end
 
