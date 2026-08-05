@@ -509,6 +509,26 @@ module OMQ
       end
     end
 
+    protected def channel_try_send(channel : Channel(Message), msg : Message) : Bool
+      select
+      when channel.send(msg)
+        true
+      else
+        false
+      end
+    rescue Channel::ClosedError
+      raise ClosedError.new("socket closed while sending")
+    end
+
+    protected def channel_try_receive(channel : Channel(Message)) : Message?
+      select
+      when msg = channel.receive?
+        msg
+      else
+        nil
+      end
+    end
+
     # Subclasses override to wire each pipe into their routing strategy.
     protected abstract def attach_pipe(pipe : Pipe) : Nil
 

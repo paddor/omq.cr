@@ -7,6 +7,7 @@ module OMQ
   # GATHER peers. Single-frame messages only.
   class SCATTER < Socket
     include QueueWritable
+    include SingleFrameTryWritable
 
     @@default_action = :connect
 
@@ -67,6 +68,7 @@ module OMQ
   # from SCATTER peers. Single-frame messages only.
   class GATHER < Socket
     include QueueReadable
+    include TryReadable
 
     @@default_action = :bind
 

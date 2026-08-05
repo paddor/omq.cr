@@ -64,6 +64,18 @@ module OMQ
         body
       end
 
+      def try_receive : Message?
+        select
+        when triple = @rx.receive?
+          return nil unless triple
+          pipe, envelope, body = triple
+          @current = {pipe, envelope}
+          body
+        else
+          nil
+        end
+      end
+
       def send(msg : Message) : Nil
         @tx.send(msg)
       end
@@ -74,6 +86,15 @@ module OMQ
         when @tx.send(msg)
         when timeout(span)
           raise IO::TimeoutError.new("send timed out after #{span}")
+        end
+      end
+
+      def try_send(msg : Message) : Bool
+        select
+        when @tx.send(msg)
+          true
+        else
+          false
         end
       end
 

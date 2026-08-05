@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Make receive-side `conflate` keep only the latest queued message.
 - Add handshake timeouts, a pending-handshake cap, and concurrent accept handshakes.
 - Add identity handover so duplicate identities replace stale ROUTER/SERVER/PEER routes.
+- Add nonblocking `try_send`, `try_receive`, and routed try-send helpers.
 
 ## [0.1.0] - 2026-08-03
 

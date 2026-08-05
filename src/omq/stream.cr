@@ -5,6 +5,7 @@ module OMQ
   class STREAM < Socket
     include QueueReadable
     include QueueWritable
+    include TryReadable
 
     @@default_action = :connect
 
@@ -29,6 +30,14 @@ module OMQ
       send_frames(msg.map(&.to_slice))
     end
 
+    def try_send(msg : Array(Bytes)) : Bool
+      try_send_frames(msg)
+    end
+
+    def try_send(msg : Array(String)) : Bool
+      try_send_frames(msg.map(&.to_slice))
+    end
+
     def send_to(identity : String, data : String) : self
       send_to(identity.to_slice, data.to_slice)
     end
@@ -43,6 +52,22 @@ module OMQ
 
     def send_to(identity : Bytes, data : Bytes) : self
       send_frames(Message{identity, data})
+    end
+
+    def try_send_to(identity : String, data : String) : Bool
+      try_send_to(identity.to_slice, data.to_slice)
+    end
+
+    def try_send_to(identity : String, data : Bytes) : Bool
+      try_send_to(identity.to_slice, data)
+    end
+
+    def try_send_to(identity : Bytes, data : String) : Bool
+      try_send_to(identity, data.to_slice)
+    end
+
+    def try_send_to(identity : Bytes, data : Bytes) : Bool
+      try_send_frames(Message{identity, data})
     end
 
     def <<(msg) : self
@@ -85,6 +110,15 @@ module OMQ
       self
     rescue Channel::ClosedError
       raise ClosedError.new("socket closed while sending")
+    end
+
+    private def try_send_frames(frames : Message) : Bool
+      raise ArgumentError.new("STREAM messages must have [identity, data] frames") unless frames.size == 2
+      if @strategy.route?(frames[0]).nil?
+        raise Error.new("no route to identity #{frames[0].inspect}") if @options.router_mandatory?
+        return true
+      end
+      channel_try_send(@strategy.tx, frames)
     end
   end
 end

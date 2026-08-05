@@ -2,6 +2,7 @@ module OMQ
   # PUB: write-only, fans out every message to every connected SUB peer.
   class PUB < Socket
     include QueueWritable
+    include MultipartTryWritable
 
     @@default_action = :bind
 
@@ -84,6 +85,8 @@ module OMQ
   class XPUB < Socket
     include QueueReadable
     include QueueWritable
+    include TryReadable
+    include MultipartTryWritable
 
     @@default_action = :bind
 
@@ -177,6 +180,8 @@ module OMQ
   # that send the ZMTP-3.0-style `\x01 + prefix` / `\x00 + prefix` frames.
   class XSUB < Socket
     include QueueWritable
+    include TryReadable
+    include MultipartTryWritable
 
     @@default_action = :connect
 
@@ -270,6 +275,7 @@ module OMQ
   # prefix are surfaced to the app.
   class SUB < Socket
     include QueueReadable
+    include TryReadable
 
     @@default_action = :connect
 

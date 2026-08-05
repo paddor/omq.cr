@@ -169,6 +169,9 @@ sub.connect("tcp://server:5555")
 Readable sockets also expose queue-style `dequeue`, `pop`, `wait`, and
 `each`; writable sockets expose `enqueue` and `push`.
 
+Use `try_receive` / `try_recv` and `try_send` for nonblocking polling.
+They return `nil` or `false` instead of waiting for data or HWM space.
+
 `socket.wait_connected(min_peers, timeout)` waits for data-plane-ready peers.
 PUB/XPUB also expose `wait_subscribed(min_subscriptions, timeout)`.
 
