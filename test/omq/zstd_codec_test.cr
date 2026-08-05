@@ -98,3 +98,15 @@ describe "ZstdTcp::Codec" do
     end
   end
 end
+
+describe "ZstdTcp::SendState" do
+  it "reuses encoded parts for the same message object" do
+    state = ZstdTcp::SendState.new
+    message = [("A" * 4096).to_slice]
+
+    first = state.encode_parts(message)
+    second = state.encode_parts(message)
+
+    assert_same first, second
+  end
+end

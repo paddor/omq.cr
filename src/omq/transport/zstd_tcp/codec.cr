@@ -175,6 +175,9 @@ module OMQ
         @auto_dict : AutoDict?
         @train_samples : Array(Bytes)?
         @train_bytes : Int32
+        @mutex = Mutex.new
+        @cached_parts : Message?
+        @cached_encoded : Message?
 
         def initialize(
           @level : Int32 = Codec::DEFAULT_LEVEL,
@@ -192,8 +195,19 @@ module OMQ
         end
 
         def encode_parts(parts : Message) : Message
-          parts.each { |part| maybe_train!(part) }
-          parts.map { |part| Codec.encode_part(part, frame_codec: @send_codec) }
+          @mutex.synchronize do
+            if cached_parts = @cached_parts
+              if cached_parts.same?(parts)
+                return @cached_encoded.not_nil!
+              end
+            end
+
+            parts.each { |part| maybe_train!(part) }
+            encoded = parts.map { |part| Codec.encode_part(part, frame_codec: @send_codec) }
+            @cached_parts = parts
+            @cached_encoded = encoded
+            encoded
+          end
         end
 
         private def maybe_train!(part : Bytes) : Nil
@@ -227,6 +241,8 @@ module OMQ
           Codec.validate_zdict!(dict)
           @send_dict_bytes = dict.dup
           @send_codec = Zinc::FrameCodec.new(dict: dict, level: @level)
+          @cached_parts = nil
+          @cached_encoded = nil
         rescue ex : Zinc::Error
           raise ProtocolError.new("ZDICT load failed: #{ex.message}")
         end

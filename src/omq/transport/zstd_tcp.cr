@@ -21,12 +21,13 @@ module OMQ
         def initialize(
           @inner : ZMTP::Connection,
           *,
+          sender : SendState? = nil,
           zstd_level : Int32 = Codec::DEFAULT_LEVEL,
           send_dict_bytes : Bytes? = nil,
           @max_message_size : Int64? = nil,
           auto_dict : AutoDict? = nil,
         )
-          @sender = SendState.new(zstd_level, dict: send_dict_bytes, auto_dict: auto_dict)
+          @sender = sender || SendState.new(zstd_level, dict: send_dict_bytes, auto_dict: auto_dict)
           @recv_no_dict_codec = build_frame_codec(nil)
           @recv_codec = @recv_no_dict_codec
           @recv_dict_bytes = nil
@@ -173,6 +174,7 @@ module OMQ
         zstd_level : Int32 = Codec::DEFAULT_LEVEL,
         zstd_dict : Bytes? = nil,
         auto_dict : AutoDict? = nil,
+        send_state : SendState? = nil,
       ) : Pipe
         tcp.sync = false
         tcp.tcp_nodelay = true
@@ -188,6 +190,7 @@ module OMQ
         )
         zmtp = Connection.new(
           raw,
+          sender: send_state,
           zstd_level: zstd_level,
           send_dict_bytes: zstd_dict,
           max_message_size: max_message_size,

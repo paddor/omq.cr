@@ -24,6 +24,7 @@ module OMQ
     @connection_infos = {} of Pipe => ConnectionInfo
     @connection_infos_by_id = {} of UInt64 => ConnectionInfo
     @pipes = [] of Pipe
+    @zstd_send_state : Transport::ZstdTcp::SendState? = nil
     @pending_handshakes = 0
     @next_connection_id = 1_u64
     @committed = false
@@ -431,6 +432,7 @@ module OMQ
             zstd_level: @options.zstd_level,
             zstd_dict: @options.zstd_dict,
             auto_dict: @options.zstd_auto_dict,
+            send_state: zstd_send_state,
           )
         end
       when "ipc"
@@ -957,6 +959,16 @@ module OMQ
       end
     end
 
+    private def zstd_send_state : Transport::ZstdTcp::SendState
+      @state_mutex.synchronize do
+        @zstd_send_state ||= Transport::ZstdTcp::SendState.new(
+          @options.zstd_level,
+          dict: @options.zstd_dict,
+          auto_dict: @options.zstd_auto_dict,
+        )
+      end
+    end
+
     private def ensure_open! : Nil
       raise ClosedError.new("socket closed") if closed?
     end
@@ -1123,6 +1135,7 @@ module OMQ
             zstd_level: @options.zstd_level,
             zstd_dict: @options.zstd_dict,
             auto_dict: @options.zstd_auto_dict,
+            send_state: zstd_send_state,
           )
         end
         if register_pipe(pipe, endpoint)
