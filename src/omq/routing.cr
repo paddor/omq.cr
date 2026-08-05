@@ -51,6 +51,33 @@ module OMQ
       rescue Channel::ClosedError
       end
 
+      protected def deliver_receive(channel : Channel(Message), msg : Message, conflate : Bool) : Bool
+        return deliver_blocking(channel, msg) unless conflate
+
+        loop do
+          return false if channel.closed?
+          select
+          when channel.send(msg)
+            return true
+          else
+            select
+            when channel.receive?
+            else
+              Fiber.yield
+            end
+          end
+        end
+      rescue Channel::ClosedError
+        false
+      end
+
+      private def deliver_blocking(channel : Channel(Message), msg : Message) : Bool
+        channel.send(msg)
+        true
+      rescue Channel::ClosedError
+        false
+      end
+
       protected def closed? : Bool
         @closed.not_nil!.get
       end

@@ -193,7 +193,7 @@ PUB/XPUB also expose `wait_subscribed(min_subscriptions, timeout)`.
 | `sndbuf` / `rcvbuf` | `nil` | Kernel socket buffer sizes (TCP/IPC only) |
 | `dict` / `lz4_dict` | `nil` | Send-side LZ4 dictionary for `lz4+tcp://`; 1-8192 bytes |
 | `auto_dict` | `nil` | Enable send-side automatic LZ4 dictionary training for `lz4+tcp://`; `true` uses 2 KiB capacity and 100-message trigger |
-| `conflate` | `false` | PUB only: keep only the latest message under pressure |
+| `conflate` | `false` | Keep only the latest queued message where message order carries no envelope state |
 | `on_mute` | `:block`; PUB/XPUB use `:drop_newest` | `:block`, `:drop_newest`, `:drop_oldest` |
 
 ## Benchmarks

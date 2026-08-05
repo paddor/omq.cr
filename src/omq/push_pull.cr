@@ -82,7 +82,7 @@ module OMQ
     end
 
     protected def on_commit_options : Nil
-      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity)
+      @strategy.commit_capacity(@options.send_capacity, @options.recv_capacity, @options.conflate)
     end
 
     def receive : Message

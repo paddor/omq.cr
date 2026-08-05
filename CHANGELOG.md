@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Add `udp://` transport for RADIO/DISH datagrams.
 - Add `STREAM` sockets over raw `tcp://` connections.
 - Add `Socket#wait_connected` and PUB/XPUB `#wait_subscribed` readiness helpers.
+- Make receive-side `conflate` keep only the latest queued message.
 
 ## [0.1.0] - 2026-08-03
 
