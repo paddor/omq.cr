@@ -112,6 +112,16 @@ module OMQ
         end
         emit_monitor(MonitorEvent::Kind::Listening, listener.endpoint)
         spawn accept_lz4_tcp(listener, listener.endpoint)
+      when "zstd+tcp"
+        listener = Transport::ZstdTcp.bind(endpoint)
+        begin
+          track_tcp_listener(listener)
+        rescue ex : ClosedError
+          listener.close
+          raise ex
+        end
+        emit_monitor(MonitorEvent::Kind::Listening, listener.endpoint)
+        spawn accept_zstd_tcp(listener, listener.endpoint)
       when "ipc"
         listener = Transport::IPC.bind(endpoint)
         begin
@@ -159,7 +169,7 @@ module OMQ
           emit_monitor(MonitorEvent::Kind::Connected, endpoint, pipe)
           spawn watch_pipe_close(pipe, endpoint)
         end
-      when "tcp", "ipc", "lz4+tcp"
+      when "tcp", "ipc", "lz4+tcp", "zstd+tcp"
         # First attempt synchronously so a happy-path connect gives the
         # caller a usable pipe before returning. On failure, hand off to
         # the retry loop in the background.
@@ -206,7 +216,7 @@ module OMQ
       case scheme
       when "inproc"
         close_inproc_listener(rest, endpoint)
-      when "tcp", "lz4+tcp"
+      when "tcp", "lz4+tcp", "zstd+tcp"
         close_matching_tcp_listeners(endpoint)
       when "ipc"
         close_matching_ipc_listeners(endpoint)
@@ -399,6 +409,28 @@ module OMQ
             rcvbuf: @options.rcvbuf,
             lz4_dict: @options.lz4_dict,
             auto_dict: @options.lz4_auto_dict,
+          )
+        end
+      when "zstd+tcp"
+        tcp = Transport::ZstdTcp.connect(endpoint)
+        with_handshake_timeout(tcp) do
+          Transport::ZstdTcp.adopt(
+            tcp,
+            local_socket_type: socket_type,
+            local_identity: @options.identity,
+            as_server: false,
+            send_capacity: @options.send_capacity,
+            recv_capacity: @options.recv_capacity,
+            mechanism: @options.mechanism,
+            max_message_size: @options.max_message_size,
+            heartbeat_interval: @options.heartbeat_interval,
+            heartbeat_ttl: @options.heartbeat_ttl,
+            heartbeat_timeout: @options.heartbeat_timeout,
+            sndbuf: @options.sndbuf,
+            rcvbuf: @options.rcvbuf,
+            zstd_level: @options.zstd_level,
+            zstd_dict: @options.zstd_dict,
+            auto_dict: @options.zstd_auto_dict,
           )
         end
       when "ipc"
@@ -596,6 +628,10 @@ module OMQ
       dict : String | Bytes | Nil = nil,
       lz4_dict : String | Bytes | Nil = nil,
       auto_dict : Bool | Transport::Lz4Tcp::AutoDict | NamedTuple(capacity: Int32, trigger: Int32) | NamedTuple(capacity: Int32) | NamedTuple(trigger: Int32) | Nil = nil,
+      level : Int32? = nil,
+      zstd_level : Int32? = nil,
+      zstd_dict : String | Bytes | Nil = nil,
+      zstd_auto_dict : Bool | Transport::ZstdTcp::AutoDict | NamedTuple(capacity: Int32) | NamedTuple(max_samples: Int32) | NamedTuple(capacity: Int32, max_samples: Int32) | NamedTuple(capacity: Int32, max_samples: Int32, max_bytes: Int32, max_sample_size: Int32) | Nil = nil,
     ) : Nil
       @options.send_hwm = send_hwm unless send_hwm.is_a?(UnsetOption)
       @options.recv_hwm = recv_hwm unless recv_hwm.is_a?(UnsetOption)
@@ -621,6 +657,10 @@ module OMQ
       @options.dict = dict if dict
       @options.lz4_dict = lz4_dict if lz4_dict
       @options.auto_dict = auto_dict unless auto_dict.nil?
+      @options.level = level if level
+      @options.zstd_level = zstd_level if zstd_level
+      @options.zstd_dict = zstd_dict if zstd_dict
+      @options.zstd_auto_dict = zstd_auto_dict unless zstd_auto_dict.nil?
     end
 
     # Subclasses override to tear down their strategy.
@@ -1049,6 +1089,55 @@ module OMQ
       end
     end
 
+    private def accept_zstd_tcp(listener : Transport::TCP::Listener, endpoint : String) : Nil
+      loop do
+        tcp = listener.accept
+        break unless tcp
+        break if closed?
+        unless try_acquire_pending_handshake?
+          reject_pending_handshake(tcp, endpoint, Transport::TCP.peer_address(tcp))
+          next
+        end
+        spawn handle_zstd_tcp_accept(tcp, endpoint)
+      end
+    end
+
+    private def handle_zstd_tcp_accept(tcp : TCPSocket, endpoint : String) : Nil
+      peer_address = Transport::TCP.peer_address(tcp)
+      begin
+        pipe = with_handshake_timeout(tcp) do
+          Transport::ZstdTcp.adopt(
+            tcp,
+            local_socket_type: socket_type,
+            local_identity: @options.identity,
+            as_server: true,
+            send_capacity: @options.send_capacity,
+            recv_capacity: @options.recv_capacity,
+            mechanism: @options.mechanism,
+            max_message_size: @options.max_message_size,
+            heartbeat_interval: @options.heartbeat_interval,
+            heartbeat_ttl: @options.heartbeat_ttl,
+            heartbeat_timeout: @options.heartbeat_timeout,
+            sndbuf: @options.sndbuf,
+            rcvbuf: @options.rcvbuf,
+            zstd_level: @options.zstd_level,
+            zstd_dict: @options.zstd_dict,
+            auto_dict: @options.zstd_auto_dict,
+          )
+        end
+        if register_pipe(pipe, endpoint)
+          emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
+          emit_monitor(MonitorEvent::Kind::HandshakeSucceeded, endpoint, pipe)
+          spawn watch_pipe_close(pipe, endpoint)
+        end
+      rescue err : IO::Error | ProtocolError
+        tcp.close rescue nil
+        emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err, peer_address: peer_address)
+      ensure
+        release_pending_handshake
+      end
+    end
+
     private def accept_ipc(listener : Transport::IPC::Listener, endpoint : String) : Nil
       loop do
         unix = listener.accept
@@ -1109,14 +1198,15 @@ module OMQ
       reconnect_interval, heartbeat_interval, heartbeat_ttl, heartbeat_timeout,
       handshake_timeout, max_pending_handshakes, max_message_size, sndbuf, rcvbuf,
       on_mute, conflate, mechanism,
-      router_mandatory?, lz4_dict, dict, lz4_auto_dict, auto_dict, to: @options
+      router_mandatory?, lz4_dict, dict, lz4_auto_dict, auto_dict,
+      zstd_level, level, zstd_dict, zstd_auto_dict, to: @options
 
     {% for m in %w(send_hwm recv_hwm linger identity read_timeout write_timeout
                   recv_timeout send_timeout reconnect_interval heartbeat_interval
                   heartbeat_ttl heartbeat_timeout handshake_timeout
                   max_pending_handshakes max_message_size sndbuf rcvbuf on_mute
                   conflate mechanism router_mandatory lz4_dict dict lz4_auto_dict
-                  auto_dict) %}
+                  auto_dict zstd_level level zstd_dict zstd_auto_dict) %}
       def {{m.id}}=(val)
         @options.{{m.id}} = val
       end

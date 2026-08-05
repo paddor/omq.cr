@@ -47,6 +47,9 @@ module OMQ
 
     @lz4_dict : Bytes? = nil
     @lz4_auto_dict : Transport::Lz4Tcp::AutoDict? = nil
+    @zstd_level : Int32 = Transport::ZstdTcp::Codec::DEFAULT_LEVEL
+    @zstd_dict : Bytes? = nil
+    @zstd_auto_dict : Transport::ZstdTcp::AutoDict? = nil
 
     property on_mute : MuteStrategy = MuteStrategy::Block
 
@@ -204,6 +207,83 @@ module OMQ
       @lz4_auto_dict = nil
     end
 
+    def zstd_level : Int32
+      @zstd_level
+    end
+
+    def zstd_level=(val : Int32)
+      @zstd_level = val
+    end
+
+    def level : Int32
+      zstd_level
+    end
+
+    def level=(val : Int32)
+      self.zstd_level = val
+    end
+
+    def zstd_dict : Bytes?
+      @zstd_dict.try(&.dup)
+    end
+
+    def zstd_dict=(val : String)
+      self.zstd_dict = val.to_slice
+    end
+
+    def zstd_dict=(val : Bytes)
+      Transport::ZstdTcp::Codec.validate_zdict!(val)
+      @zstd_dict = val.dup
+      validate_zstd_dictionary_modes!
+    end
+
+    def zstd_dict=(val : Nil)
+      @zstd_dict = nil
+    end
+
+    def zstd_auto_dict : Transport::ZstdTcp::AutoDict?
+      @zstd_auto_dict
+    end
+
+    def zstd_auto_dict=(val : Bool)
+      @zstd_auto_dict = val ? Transport::ZstdTcp::AutoDict.new : nil
+      validate_zstd_dictionary_modes!
+    end
+
+    def zstd_auto_dict=(val : Transport::ZstdTcp::AutoDict)
+      @zstd_auto_dict = val
+      validate_zstd_dictionary_modes!
+    end
+
+    def zstd_auto_dict=(val : NamedTuple(capacity: Int32))
+      @zstd_auto_dict = Transport::ZstdTcp::AutoDict.new(capacity: val[:capacity])
+      validate_zstd_dictionary_modes!
+    end
+
+    def zstd_auto_dict=(val : NamedTuple(max_samples: Int32))
+      @zstd_auto_dict = Transport::ZstdTcp::AutoDict.new(max_samples: val[:max_samples])
+      validate_zstd_dictionary_modes!
+    end
+
+    def zstd_auto_dict=(val : NamedTuple(capacity: Int32, max_samples: Int32))
+      @zstd_auto_dict = Transport::ZstdTcp::AutoDict.new(capacity: val[:capacity], max_samples: val[:max_samples])
+      validate_zstd_dictionary_modes!
+    end
+
+    def zstd_auto_dict=(val : NamedTuple(capacity: Int32, max_samples: Int32, max_bytes: Int32, max_sample_size: Int32))
+      @zstd_auto_dict = Transport::ZstdTcp::AutoDict.new(
+        capacity: val[:capacity],
+        max_samples: val[:max_samples],
+        max_bytes: val[:max_bytes],
+        max_sample_size: val[:max_sample_size],
+      )
+      validate_zstd_dictionary_modes!
+    end
+
+    def zstd_auto_dict=(val : Nil)
+      @zstd_auto_dict = nil
+    end
+
     # Symbol → MuteStrategy shim so `on_mute = :drop_newest` works, the
     # idiomatic Ruby-OMQ spelling.
     def on_mute=(val : Symbol)
@@ -216,6 +296,10 @@ module OMQ
 
     private def validate_lz4_dictionary_modes! : Nil
       raise ArgumentError.new("cannot combine auto_dict: and dict:") if @lz4_dict && @lz4_auto_dict
+    end
+
+    private def validate_zstd_dictionary_modes! : Nil
+      raise ArgumentError.new("cannot combine zstd_auto_dict: and zstd_dict:") if @zstd_dict && @zstd_auto_dict
     end
   end
 end

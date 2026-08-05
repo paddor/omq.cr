@@ -17,6 +17,9 @@ dependencies:
   flint:
     github: paddor/flint
     version: "~> 0.1.0"
+  zinc:
+    github: paddor/zinc.cr
+    version: "~> 0.2.1"
 
 development_dependencies:
   minitest:
