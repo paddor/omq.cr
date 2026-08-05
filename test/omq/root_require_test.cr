@@ -6,6 +6,7 @@ describe "require omq" do
     assert_equal "SERVER", OMQ::SERVER::SOCKET_TYPE
     assert_equal "RADIO", OMQ::RADIO::SOCKET_TYPE
     assert_equal "DISH", OMQ::DISH::SOCKET_TYPE
+    assert_equal "STREAM", OMQ::STREAM::SOCKET_TYPE
     assert_equal "SCATTER", OMQ::SCATTER::SOCKET_TYPE
     assert_equal "GATHER", OMQ::GATHER::SOCKET_TYPE
     assert_equal "PEER", OMQ::PEER::SOCKET_TYPE

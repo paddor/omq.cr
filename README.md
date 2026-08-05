@@ -154,6 +154,7 @@ Classes live under `OMQ::`.
 | **XPUB** / **XSUB** | Fan-out / broadcast | Subscribe events / no filter | DropNewest by default on XPUB; configurable |
 | **PUSH** / **PULL** | Work-stealing to workers | Fair-queue | Block |
 | **DEALER** / **ROUTER** | Work-stealing / identity-route | Fair-queue | Block |
+| **STREAM** | Identity-route raw TCP | Identity-prefixed raw TCP | Block |
 | **PAIR** | Exclusive 1-to-1 | Exclusive 1-to-1 | Block |
 
 Set options between `.new` and the first `.bind`/`.connect`:
@@ -215,7 +216,7 @@ comparison.
 Pre-1.0. All 12 standard socket types work, inproc/ipc/tcp/udp/lz4+tcp all
 work, heartbeat/linger/reconnect/HWM/on_mute/conflate/max_message_size/sndbuf/rcvbuf
 are wired through. PLAIN auth, draft socket types (CLIENT/SERVER,
-RADIO/DISH, SCATTER/GATHER, PEER, CHANNEL), CURVE encryption (opt-in via
+RADIO/DISH, SCATTER/GATHER, PEER, CHANNEL, STREAM), CURVE encryption (opt-in via
 `require "omq/curve"`), and the monitor-event API all work — see
 [`CHANGELOG.md`](CHANGELOG.md).
 

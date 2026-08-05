@@ -71,6 +71,7 @@ module OMQ
       ensure_open!
       commit_options
       scheme, rest = parse_endpoint(endpoint)
+      reject_stream_non_tcp!(scheme)
       case scheme
       when "inproc"
         listener = Transport::Inproc.bind(rest)
@@ -92,7 +93,11 @@ module OMQ
           raise ex
         end
         emit_monitor(MonitorEvent::Kind::Listening, listener.endpoint)
-        spawn accept_tcp(listener, listener.endpoint)
+        if stream_socket?
+          spawn accept_stream_tcp(listener, listener.endpoint)
+        else
+          spawn accept_tcp(listener, listener.endpoint)
+        end
       when "lz4+tcp"
         listener = Transport::Lz4Tcp.bind(endpoint)
         begin
@@ -140,8 +145,9 @@ module OMQ
     def connect(endpoint : String) : self
       ensure_open!
       commit_options
-      enable_connect_endpoint(endpoint)
       scheme, rest = parse_endpoint(endpoint)
+      reject_stream_non_tcp!(scheme)
+      enable_connect_endpoint(endpoint)
       case scheme
       when "inproc"
         pipe = Transport::Inproc.connect(rest, capacity: @options.recv_capacity, local_identity: @options.identity)
@@ -323,21 +329,31 @@ module OMQ
       case scheme
       when "tcp"
         tcp = Transport::TCP.connect(endpoint)
-        Transport::TCP.adopt(
-          tcp,
-          local_socket_type: socket_type,
-          local_identity: @options.identity,
-          as_server: false,
-          send_capacity: @options.send_capacity,
-          recv_capacity: @options.recv_capacity,
-          mechanism: @options.mechanism,
-          max_message_size: @options.max_message_size,
-          heartbeat_interval: @options.heartbeat_interval,
-          heartbeat_ttl: @options.heartbeat_ttl,
-          heartbeat_timeout: @options.heartbeat_timeout,
-          sndbuf: @options.sndbuf,
-          rcvbuf: @options.rcvbuf,
-        )
+        if stream_socket?
+          Transport::StreamRaw.adopt(
+            tcp,
+            send_capacity: @options.send_capacity,
+            recv_capacity: @options.recv_capacity,
+            sndbuf: @options.sndbuf,
+            rcvbuf: @options.rcvbuf,
+          )
+        else
+          Transport::TCP.adopt(
+            tcp,
+            local_socket_type: socket_type,
+            local_identity: @options.identity,
+            as_server: false,
+            send_capacity: @options.send_capacity,
+            recv_capacity: @options.recv_capacity,
+            mechanism: @options.mechanism,
+            max_message_size: @options.max_message_size,
+            heartbeat_interval: @options.heartbeat_interval,
+            heartbeat_ttl: @options.heartbeat_ttl,
+            heartbeat_timeout: @options.heartbeat_timeout,
+            sndbuf: @options.sndbuf,
+            rcvbuf: @options.rcvbuf,
+          )
+        end
       when "lz4+tcp"
         tcp = Transport::Lz4Tcp.connect(endpoint)
         Transport::Lz4Tcp.adopt(
@@ -560,6 +576,16 @@ module OMQ
       {endpoint[0...idx], endpoint[idx + 3..]}
     end
 
+    private def stream_socket? : Bool
+      socket_type == "STREAM"
+    end
+
+    private def reject_stream_non_tcp!(scheme : String) : Nil
+      return unless stream_socket?
+      return if scheme == "tcp"
+      raise UnsupportedTransport.new("STREAM sockets only support tcp:// endpoints")
+    end
+
     private def register_pipe(pipe : Pipe, endpoint : String) : Bool
       should_attach = @state_mutex.synchronize do
         if @closed || pipe.closed? || @disabled_connect_endpoints.includes?(endpoint)
@@ -758,6 +784,30 @@ module OMQ
             spawn watch_pipe_close(pipe, endpoint)
           end
         rescue err : IO::Error | ProtocolError
+          tcp.close rescue nil
+          emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err)
+        end
+      end
+    end
+
+    private def accept_stream_tcp(listener : Transport::TCP::Listener, endpoint : String) : Nil
+      loop do
+        tcp = listener.accept
+        break unless tcp
+        break if closed?
+        begin
+          pipe = Transport::StreamRaw.adopt(
+            tcp,
+            send_capacity: @options.send_capacity,
+            recv_capacity: @options.recv_capacity,
+            sndbuf: @options.sndbuf,
+            rcvbuf: @options.rcvbuf,
+          )
+          if register_pipe(pipe, endpoint)
+            emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
+            spawn watch_pipe_close(pipe, endpoint)
+          end
+        rescue err : IO::Error
           tcp.close rescue nil
           emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err)
         end

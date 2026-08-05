@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Add PLAIN username/password authentication for ZMTP handshakes.
 - Add `udp://` transport for RADIO/DISH datagrams.
+- Add `STREAM` sockets over raw `tcp://` connections.
 
 ## [0.1.0] - 2026-08-03
 
