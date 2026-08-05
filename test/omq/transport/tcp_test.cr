@@ -32,8 +32,8 @@ describe "PAIR over TCP" do
       client.send(["a".to_slice, "bb".to_slice, "ccc".to_slice])
       got = server.receive
       assert_equal 3, got.size
-      assert_equal "a",   String.new(got[0])
-      assert_equal "bb",  String.new(got[1])
+      assert_equal "a", String.new(got[0])
+      assert_equal "bb", String.new(got[1])
       assert_equal "ccc", String.new(got[2])
 
       client.close

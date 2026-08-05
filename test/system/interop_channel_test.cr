@@ -1,7 +1,6 @@
 require "./system_test_helper"
 require "../../src/omq/channel"
 
-
 describe "Crystal CHANNEL ↔ Ruby CHANNEL over TCP" do
   it "round-trips a single-frame message" do
     if OMQ::SystemTestHelper.ruby_bin.nil?

@@ -34,7 +34,6 @@ describe "send_timeout" do
   end
 end
 
-
 describe "read_timeout" do
   it "raises IO::TimeoutError when PULL receive blocks longer than read_timeout" do
     OMQ::TestHelper.with_timeout(2.seconds) do

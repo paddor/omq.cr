@@ -1,6 +1,5 @@
 require "./system_test_helper"
 
-
 describe "Ruby PULL ↔ Crystal PUSH over TCP" do
   it "pushes N messages and the Ruby puller sees them in order" do
     if OMQ::SystemTestHelper.ruby_bin.nil?
