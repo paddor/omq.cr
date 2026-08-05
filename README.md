@@ -169,6 +169,9 @@ sub.connect("tcp://server:5555")
 Readable sockets also expose queue-style `dequeue`, `pop`, `wait`, and
 `each`; writable sockets expose `enqueue` and `push`.
 
+`socket.wait_connected(min_peers, timeout)` waits for data-plane-ready peers.
+PUB/XPUB also expose `wait_subscribed(min_subscriptions, timeout)`.
+
 ### Endpoint prefix convention
 
 - `"@tcp://…"` — bind

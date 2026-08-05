@@ -42,6 +42,18 @@ module OMQ
       @strategy.subscriber_joined
     end
 
+    def subscription_count : Int64
+      @strategy.subscription_count
+    end
+
+    def wait_subscribed(min_subscriptions : Int, timeout : Time::Span) : Int64
+      @strategy.wait_subscribed(min_subscriptions, timeout)
+    end
+
+    def wait_subscribed(timeout : Time::Span) : Int64
+      wait_subscribed(1, timeout)
+    end
+
     protected def socket_type : String
       SOCKET_TYPE
     end
@@ -110,6 +122,18 @@ module OMQ
 
     def subscriber_joined : Channel(Pipe)
       @strategy.subscriber_joined
+    end
+
+    def subscription_count : Int64
+      @strategy.subscription_count
+    end
+
+    def wait_subscribed(min_subscriptions : Int, timeout : Time::Span) : Int64
+      @strategy.wait_subscribed(min_subscriptions, timeout)
+    end
+
+    def wait_subscribed(timeout : Time::Span) : Int64
+      wait_subscribed(1, timeout)
     end
 
     def receive : Message

@@ -451,6 +451,28 @@ module OMQ
       @state_mutex.synchronize { @pipes.count { |p| !p.closed? } }
     end
 
+    # Wait until at least `min_peers` pipes are ready for data-plane routing.
+    # TCP/IPC peers count only after ZMTP handshake; STREAM peers count once
+    # the raw TCP connection is adopted.
+    def wait_connected(min_peers : Int, timeout : Time::Span) : Int32
+      raise ArgumentError.new("min_peers must be >= 0") if min_peers < 0
+      deadline = Time.instant + timeout
+      loop do
+        count = peer_count
+        return count if count >= min_peers
+        raise ClosedError.new("socket closed while waiting for peers") if closed?
+
+        remaining = deadline - Time.instant
+        raise IO::TimeoutError.new("wait_connected timed out after #{timeout}") unless remaining.positive?
+        nap = remaining < 5.milliseconds ? remaining : 5.milliseconds
+        raise ClosedError.new("socket closed while waiting for peers") unless sleep_with_shutdown(nap)
+      end
+    end
+
+    def wait_connected(timeout : Time::Span) : Int32
+      wait_connected(1, timeout)
+    end
+
     # Send `msg` on `channel`, raising `IO::TimeoutError` if the socket's
     # `write_timeout` elapses first. `nil` timeout = block forever.
     protected def channel_send(channel : Channel(Message), msg : Message) : Nil
