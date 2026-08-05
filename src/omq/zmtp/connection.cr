@@ -143,7 +143,9 @@ module OMQ::ZMTP
         @io.read_fully(body) if size > 0
 
         if @mechanism.encrypted?
-          raise ProtocolError.new("expected MESSAGE command under CURVE") unless wire_command
+          # Ruby OMQ wraps CURVE MESSAGE in a normal data frame. The
+          # standard command-bit form is still what we emit, but accept
+          # both so the encrypted data path interoperates.
           payload, more, command = @mechanism.decrypt(body)
         else
           payload = body
