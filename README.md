@@ -172,6 +172,11 @@ Readable sockets also expose queue-style `dequeue`, `pop`, `wait`, and
 Use `try_receive` / `try_recv` and `try_send` for nonblocking polling.
 They return `nil` or `false` instead of waiting for data or HWM space.
 
+`OMQ.proxy(frontend, backend)` forwards between sockets. Use
+`OMQ.proxy_steerable(frontend, backend, control)` for `PAUSE`, `RESUME`,
+`TERMINATE`, and `KILL` control commands; an optional capture socket receives
+best-effort copies.
+
 `socket.wait_connected(min_peers, timeout)` waits for data-plane-ready peers.
 PUB/XPUB also expose `wait_subscribed(min_subscriptions, timeout)`.
 

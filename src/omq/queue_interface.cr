@@ -84,6 +84,15 @@ module OMQ
       try_send_frames([msg])
     end
 
+    def try_send(msg : Array(String)) : Bool
+      try_send(msg.map(&.to_slice))
+    end
+
+    def try_send(msg : Array(Bytes)) : Bool
+      raise ArgumentError.new("single-frame socket messages must have exactly one frame") unless msg.size == 1
+      try_send_frames(msg)
+    end
+
     private def try_send_frames(frames : Message) : Bool
       channel_try_send(@strategy.tx, frames)
     end

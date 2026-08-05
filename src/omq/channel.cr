@@ -42,6 +42,15 @@ module OMQ
       try_send_frames([msg])
     end
 
+    def try_send(msg : Array(String)) : Bool
+      try_send(msg.map(&.to_slice))
+    end
+
+    def try_send(msg : Array(Bytes)) : Bool
+      raise ArgumentError.new("CHANNEL messages must have exactly one frame") unless msg.size == 1
+      try_send_frames(msg)
+    end
+
     def <<(msg) : self
       send(msg)
     end

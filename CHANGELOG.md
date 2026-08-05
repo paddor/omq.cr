@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Add handshake timeouts, a pending-handshake cap, and concurrent accept handshakes.
 - Add identity handover so duplicate identities replace stale ROUTER/SERVER/PEER routes.
 - Add nonblocking `try_send`, `try_receive`, and routed try-send helpers.
+- Add bounded-burst proxy helpers with capture and steerable control support.
 
 ## [0.1.0] - 2026-08-03
 

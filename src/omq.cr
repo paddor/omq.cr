@@ -52,6 +52,7 @@ require "./omq/scatter_gather"
 require "./omq/radio_dish"
 require "./omq/peer"
 require "./omq/channel"
+require "./omq/proxy"
 
 # Pure-Crystal ZeroMQ (ZMTP 3.1). Interoperable with libzmq, pyzmq, CZMQ,
 # and the Ruby `omq` gem. No libzmq, no FFI.
