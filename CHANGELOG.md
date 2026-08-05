@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Add nonblocking `try_send`, `try_receive`, and routed try-send helpers.
 - Add bounded-burst proxy helpers with capture and steerable control support.
 - Add `ConnectionInfo` snapshots and attach them to pipe monitor events.
+- Tighten option handling for nil handshake timeouts, identity length, and handshake caps.
 
 ## [0.1.0] - 2026-08-03
 

@@ -577,7 +577,7 @@ module OMQ
       heartbeat_interval : Time::Span? = nil,
       heartbeat_ttl : Time::Span? = nil,
       heartbeat_timeout : Time::Span? = nil,
-      handshake_timeout : Time::Span? = nil,
+      handshake_timeout : Time::Span | Nil | UnsetOption = UNSET,
       max_pending_handshakes : Int32? = nil,
       max_message_size : Int64? = nil,
       sndbuf : Int32? = nil,
@@ -602,7 +602,7 @@ module OMQ
       @options.heartbeat_interval = heartbeat_interval if heartbeat_interval
       @options.heartbeat_ttl = heartbeat_ttl if heartbeat_ttl
       @options.heartbeat_timeout = heartbeat_timeout if heartbeat_timeout
-      @options.handshake_timeout = handshake_timeout if handshake_timeout
+      @options.handshake_timeout = handshake_timeout unless handshake_timeout.is_a?(UnsetOption)
       @options.max_pending_handshakes = max_pending_handshakes if max_pending_handshakes
       @options.max_message_size = max_message_size if max_message_size
       @options.sndbuf = sndbuf if sndbuf
