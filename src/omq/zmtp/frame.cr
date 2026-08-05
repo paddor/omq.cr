@@ -33,7 +33,9 @@ module OMQ::ZMTP
       command = (flags & FLAG_COMMAND) != 0
       long = (flags & FLAG_LONG) != 0
       size = if long
-               io.read_bytes(UInt64, IO::ByteFormat::NetworkEndian).to_i64
+               raw_size = io.read_bytes(UInt64, IO::ByteFormat::NetworkEndian)
+               raise ProtocolError.new("frame too large: #{raw_size}") if raw_size > Int64::MAX
+               raw_size.to_i64
              else
                (io.read_byte || raise IO::EOFError.new).to_i64
              end

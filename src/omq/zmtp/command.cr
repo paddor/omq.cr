@@ -90,9 +90,12 @@ module OMQ::ZMTP
       io = IO::Memory.new(body)
       while io.pos < body.size
         name_len = io.read_byte || break
+        raise ProtocolError.new("truncated property name") if body.size.to_i64 - io.pos < name_len
         name_bytes = Bytes.new(name_len.to_i)
         io.read_fully(name_bytes)
+        raise ProtocolError.new("truncated property value length") if body.size.to_i64 - io.pos < 4
         value_len = io.read_bytes(UInt32, IO::ByteFormat::NetworkEndian)
+        raise ProtocolError.new("truncated property value") if body.size.to_i64 - io.pos < value_len.to_i64
         value = Bytes.new(value_len.to_i)
         io.read_fully(value)
         props[String.new(name_bytes)] = value

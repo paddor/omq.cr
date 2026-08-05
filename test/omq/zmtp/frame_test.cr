@@ -58,8 +58,17 @@ describe "OMQ::ZMTP::Frame" do
     end
   end
 
+  it "rejects long frame sizes that do not fit Int64" do
+    io = IO::Memory.new
+    io.write_byte(OMQ::ZMTP::FLAG_LONG)
+    io.write_bytes(UInt64::MAX, IO::ByteFormat::NetworkEndian)
+    io.rewind
+
+    assert_raises(OMQ::ProtocolError) { OMQ::ZMTP::Frame.decode(io) }
+  end
+
   it "raises on short read" do
-    io = IO::Memory.new(Bytes[0x00])   # flags but no length byte
+    io = IO::Memory.new(Bytes[0x00]) # flags but no length byte
     assert_raises(IO::EOFError) { OMQ::ZMTP::Frame.decode(io) }
   end
 

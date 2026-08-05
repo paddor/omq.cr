@@ -88,4 +88,15 @@ describe "OMQ::ZMTP::Command" do
     # name-length byte claims 10, but only 3 bytes of name follow
     assert_raises(OMQ::ProtocolError) { OMQ::ZMTP::Command.parse(Bytes[10, 65, 66, 67]) }
   end
+
+  it "rejects truncated READY properties before allocating value storage" do
+    huge_value = Bytes[
+      1, 88,                  # property name: "X"
+      0xFF, 0xFF, 0xFF, 0xFF, # claimed value length
+    ]
+
+    assert_raises(OMQ::ProtocolError) { OMQ::ZMTP::Command.parse_properties(huge_value) }
+    assert_raises(OMQ::ProtocolError) { OMQ::ZMTP::Command.parse_properties(Bytes[5, 65]) }
+    assert_raises(OMQ::ProtocolError) { OMQ::ZMTP::Command.parse_properties(Bytes[1, 65, 0]) }
+  end
 end
