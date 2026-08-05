@@ -18,12 +18,31 @@ module OMQ::ZMTP
     def ready(socket_type : String, identity : Bytes = Bytes.empty, extras : Hash(String, Bytes)? = nil) : Bytes
       io = IO::Memory.new
       write_name(io, "READY")
+      io.write(properties(socket_type, identity, extras))
+      io.to_slice
+    end
+
+    def properties(socket_type : String, identity : Bytes = Bytes.empty, extras : Hash(String, Bytes)? = nil) : Bytes
+      io = IO::Memory.new
       write_property(io, "Socket-Type", socket_type.to_slice)
       write_property(io, "Identity", identity)
       extras.try &.each do |k, v|
         write_property(io, k, v)
       end
       io.to_slice
+    end
+
+    def named(name : String, body : Bytes = Bytes.empty) : Bytes
+      name_body(name, body)
+    end
+
+    def error(reason : String) : Bytes
+      reason_bytes = reason.to_slice
+      len = {reason_bytes.size, 255}.min
+      body = Bytes.new(1 + len)
+      body[0] = len.to_u8
+      body[1, len].copy_from(reason_bytes[0, len]) if len > 0
+      name_body("ERROR", body)
     end
 
     def subscribe(prefix : Bytes) : Bytes
@@ -86,6 +105,13 @@ module OMQ::ZMTP
       raise ProtocolError.new("PING body too short") if body.size < 2
       ttl = IO::ByteFormat::NetworkEndian.decode(UInt16, body[0, 2])
       {ttl, body[2..]}
+    end
+
+    def parse_error(body : Bytes) : String
+      raise ProtocolError.new("ERROR body empty") if body.empty?
+      len = body[0].to_i
+      raise ProtocolError.new("ERROR reason truncated") if body.size < 1 + len
+      String.new(body[1, len])
     end
 
     private def name_body(name : String, body : Bytes) : Bytes

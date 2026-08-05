@@ -37,6 +37,8 @@ loop.
 - **Every transport** — `tcp://`, `lz4+tcp://`, `ipc://` (Unix domain
   sockets, abstract namespace via leading `@`), `inproc://` (in-process
   channel pairs)
+- **Security mechanisms** — NULL by default, PLAIN username/password auth,
+  CURVE encryption via `require "omq/curve"`
 - **Wire-compatible** — interoperates with libzmq, pyzmq, CZMQ, JeroMQ,
   and the Ruby `omq` gem over TCP and IPC
 - **Bind/connect order doesn't matter** — connect before bind, bind before
@@ -212,10 +214,25 @@ comparison.
 
 Pre-1.0. All 12 standard socket types work, inproc/ipc/tcp/lz4+tcp all work,
 heartbeat/linger/reconnect/HWM/on_mute/conflate/max_message_size/sndbuf/rcvbuf
-are wired through. Draft socket types (CLIENT/SERVER, RADIO/DISH,
-SCATTER/GATHER, PEER, CHANNEL), CURVE encryption (opt-in via `require
-"omq/curve"`), and the monitor-event API all work — see
+are wired through. PLAIN auth, draft socket types (CLIENT/SERVER,
+RADIO/DISH, SCATTER/GATHER, PEER, CHANNEL), CURVE encryption (opt-in via
+`require "omq/curve"`), and the monitor-event API all work — see
 [`CHANGELOG.md`](CHANGELOG.md).
+
+## PLAIN authentication
+
+PLAIN authenticates a username/password during the ZMTP handshake. Traffic
+after the handshake is not encrypted.
+
+```crystal
+pull = OMQ::PULL.new
+pull.mechanism = OMQ::ZMTP::Mechanism::Plain.server({"alice" => "secret"})
+pull.bind("tcp://127.0.0.1:5555")
+
+push = OMQ::PUSH.new
+push.mechanism = OMQ::ZMTP::Mechanism::Plain.client("alice", "secret")
+push.connect("tcp://127.0.0.1:5555")
+```
 
 ## CURVE encryption
 

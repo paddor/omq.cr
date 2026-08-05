@@ -34,3 +34,4 @@ module OMQ::ZMTP
 end
 
 require "./mechanism/null"
+require "./mechanism/plain"

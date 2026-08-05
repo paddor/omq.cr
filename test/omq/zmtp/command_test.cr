@@ -27,6 +27,27 @@ describe "OMQ::ZMTP::Command" do
     assert_equal "bar", String.new(props["X-Foo"])
   end
 
+  it "encodes property bodies for PLAIN INITIATE" do
+    body = OMQ::ZMTP::Command.properties("DEALER", "worker".to_slice)
+    props = OMQ::ZMTP::Command.parse_properties(body)
+    assert_equal "DEALER", String.new(props["Socket-Type"])
+    assert_equal "worker", String.new(props["Identity"])
+  end
+
+  it "encodes generic commands" do
+    payload = OMQ::ZMTP::Command.named("WELCOME")
+    name, body = OMQ::ZMTP::Command.parse(payload)
+    assert_equal "WELCOME", name
+    assert_empty body
+  end
+
+  it "round-trips ERROR commands" do
+    payload = OMQ::ZMTP::Command.error("bad credentials")
+    name, body = OMQ::ZMTP::Command.parse(payload)
+    assert_equal "ERROR", name
+    assert_equal "bad credentials", OMQ::ZMTP::Command.parse_error(body)
+  end
+
   it "round-trips SUBSCRIBE / CANCEL" do
     sub = OMQ::ZMTP::Command.subscribe("topic".to_slice)
     name, body = OMQ::ZMTP::Command.parse(sub)
