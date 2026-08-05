@@ -33,7 +33,14 @@ module OMQ::ZMTP
       NAME
     end
 
-    def handshake(io : IO, *, local_socket_type : String, local_identity : Bytes, as_server : Bool) : Hash(String, Bytes)
+    def handshake(
+      io : IO,
+      *,
+      local_socket_type : String,
+      local_identity : Bytes,
+      as_server : Bool,
+      peer_address : String? = nil,
+    ) : Hash(String, Bytes)
       raise ProtocolError.new("PLAIN role mismatch") unless as_server == @as_server
 
       if @as_server

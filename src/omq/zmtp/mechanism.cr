@@ -9,7 +9,14 @@ module OMQ::ZMTP
     #
     # Implementations send/receive READY (and for CURVE: HELLO/WELCOME/
     # INITIATE) via `io`, returning the remote peer's property map.
-    abstract def handshake(io : IO, *, local_socket_type : String, local_identity : Bytes, as_server : Bool) : Hash(String, Bytes)
+    abstract def handshake(
+      io : IO,
+      *,
+      local_socket_type : String,
+      local_identity : Bytes,
+      as_server : Bool,
+      peer_address : String? = nil,
+    ) : Hash(String, Bytes)
 
     # True if this mechanism wraps every post-handshake frame in an
     # encrypted MESSAGE command. NULL returns false; CURVE returns true.

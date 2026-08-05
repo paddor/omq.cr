@@ -39,6 +39,7 @@ module OMQ
           close_signal: close_signal,
         )
         pipe.peer_identity = identity
+        pipe.peer_address = TCP.peer_address(tcp)
         pipe
       end
 

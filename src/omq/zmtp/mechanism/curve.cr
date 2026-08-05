@@ -38,16 +38,65 @@ module OMQ::ZMTP
     BOX_OVERHEAD = 16
     MAX_NONCE    = UInt64::MAX
 
+    class PeerInfo
+      @public_key : Bytes
+      @identity : Bytes?
 
-    def self.server(*, public_key : Bytes, secret_key : Bytes, authenticator : Proc(Bytes, Bool)? = nil) : Curve
-      new(public_key: public_key, secret_key: secret_key, server_key: nil, as_server: true, authenticator: authenticator)
+      def initialize(*, public_key : Bytes, identity : Bytes?, @peer_address : String?)
+        @public_key = public_key.dup
+        @identity = identity.try(&.dup)
+      end
+
+      def public_key : Bytes
+        @public_key.dup
+      end
+
+      def identity : Bytes?
+        @identity.try(&.dup)
+      end
+
+      getter peer_address : String?
     end
 
+    alias KeyAuthenticator = Proc(Bytes, Bool)
+    alias PeerAuthenticator = Proc(PeerInfo, Bool)
+
+    def self.server(*, public_key : Bytes, secret_key : Bytes, authenticator : KeyAuthenticator? = nil) : Curve
+      new(
+        public_key: public_key,
+        secret_key: secret_key,
+        server_key: nil,
+        as_server: true,
+        key_authenticator: authenticator,
+        peer_authenticator: nil,
+      )
+    end
+
+    def self.server(*, public_key : Bytes, secret_key : Bytes, authenticator : PeerAuthenticator) : Curve
+      new(
+        public_key: public_key,
+        secret_key: secret_key,
+        server_key: nil,
+        as_server: true,
+        key_authenticator: nil,
+        peer_authenticator: authenticator,
+      )
+    end
+
+    def self.server(*, public_key : Bytes, secret_key : Bytes, &authenticator : PeerInfo -> Bool) : Curve
+      new(
+        public_key: public_key,
+        secret_key: secret_key,
+        server_key: nil,
+        as_server: true,
+        key_authenticator: nil,
+        peer_authenticator: authenticator,
+      )
+    end
 
     def self.client(*, server_key : Bytes, public_key : Bytes? = nil, secret_key : Bytes? = nil) : Curve
       new(public_key: public_key, secret_key: secret_key, server_key: server_key, as_server: false)
     end
-
 
     @permanent_public : Natron::PublicKey
     @permanent_secret : Natron::PrivateKey
@@ -59,8 +108,15 @@ module OMQ::ZMTP
     @send_nonce : UInt64 = 0_u64
     @recv_nonce : UInt64 = 0_u64
 
-
-    def initialize(*, public_key : Bytes?, secret_key : Bytes?, server_key : Bytes?, @as_server : Bool, @authenticator : Proc(Bytes, Bool)? = nil)
+    def initialize(
+      *,
+      public_key : Bytes?,
+      secret_key : Bytes?,
+      server_key : Bytes?,
+      @as_server : Bool,
+      @key_authenticator : KeyAuthenticator? = nil,
+      @peer_authenticator : PeerAuthenticator? = nil,
+    )
       if @as_server
         raise ArgumentError.new("public_key required") unless public_key
         raise ArgumentError.new("secret_key required") unless secret_key
@@ -84,25 +140,28 @@ module OMQ::ZMTP
       @recv_prefix = @as_server ? NONCE_PREFIX_MESSAGE_C : NONCE_PREFIX_MESSAGE_S
     end
 
-
     def name : String
       NAME
     end
-
 
     def encrypted? : Bool
       true
     end
 
-
-    def handshake(io : IO, *, local_socket_type : String, local_identity : Bytes, as_server : Bool) : Hash(String, Bytes)
+    def handshake(
+      io : IO,
+      *,
+      local_socket_type : String,
+      local_identity : Bytes,
+      as_server : Bool,
+      peer_address : String? = nil,
+    ) : Hash(String, Bytes)
       if @as_server
-        server_handshake(io, local_socket_type, local_identity)
+        server_handshake(io, local_socket_type, local_identity, peer_address)
       else
         client_handshake(io, local_socket_type, local_identity)
       end
     end
-
 
     def encrypt(payload : Bytes, *, more : Bool, command : Bool) : Bytes
       flags = 0_u8
@@ -123,7 +182,6 @@ module OMQ::ZMTP
       io.write(ciphertext)
       body
     end
-
 
     def decrypt(body : Bytes) : {Bytes, Bool, Bool}
       io = IO::Memory.new(body)
@@ -154,11 +212,9 @@ module OMQ::ZMTP
       {inner, more, command}
     end
 
-
     private def session_box : Natron::Box
       @session_box || raise ProtocolError.new("CURVE session not established")
     end
-
 
     private def next_send_nonce : {Bytes, Bytes}
       @send_nonce += 1
@@ -171,12 +227,10 @@ module OMQ::ZMTP
       {full, short}
     end
 
-
     private def write_command(io : IO, body : Bytes) : Nil
       Frame.encode(io, body, command: true)
       io.flush if io.responds_to?(:flush)
     end
-
 
     private def read_command(io : IO, expected_name : String) : Bytes
       payload, _more, is_command = Frame.decode(io)
@@ -186,7 +240,6 @@ module OMQ::ZMTP
       rest
     end
 
-
     private def build_command(name : String, data : Bytes) : Bytes
       name_bytes = name.to_slice
       body = Bytes.new(1 + name_bytes.size + data.size)
@@ -195,7 +248,6 @@ module OMQ::ZMTP
       data.copy_to(body + 1 + name_bytes.size) if data.size > 0
       body
     end
-
 
     private def join_bytes(parts : Array(Bytes)) : Bytes
       total = parts.sum(&.size)
@@ -208,7 +260,6 @@ module OMQ::ZMTP
       buf
     end
 
-
     private def nonce_with(prefix : Bytes, short : Bytes) : Bytes
       raise ProtocolError.new("nonce suffix wrong size") unless short.size == 8 || short.size == 16
       buf = Bytes.new(prefix.size + short.size)
@@ -216,7 +267,6 @@ module OMQ::ZMTP
       short.copy_to(buf + prefix.size)
       buf
     end
-
 
     # ------------------------------------------------------------------
     # Client-side handshake
@@ -234,8 +284,8 @@ module OMQ::ZMTP
       signature = Natron::Box.new(server_pub, cn_secret).encrypt(hello_nonce, Bytes.new(64))
 
       hello_data = join_bytes([
-        Bytes.new(1) { |_| 0x01_u8 },  # will overwrite below
-        Bytes.new(1) { |_| 0x00_u8 },  # filler minor version placeholder
+        Bytes.new(1) { |_| 0x01_u8 }, # will overwrite below
+        Bytes.new(1) { |_| 0x00_u8 }, # filler minor version placeholder
       ])
       # Actual HELLO data layout: version(2) + filler(72) + cn_public(32) +
       # short_nonce(8) + signature(80) = 194.
@@ -303,12 +353,16 @@ module OMQ::ZMTP
       props
     end
 
-
     # ------------------------------------------------------------------
     # Server-side handshake
     # ------------------------------------------------------------------
 
-    private def server_handshake(io : IO, local_socket_type : String, local_identity : Bytes) : Hash(String, Bytes)
+    private def server_handshake(
+      io : IO,
+      local_socket_type : String,
+      local_identity : Bytes,
+      peer_address : String?,
+    ) : Hash(String, Bytes)
       cookie_key = @cookie_key || raise "server without cookie_key"
 
       # --- Read HELLO ---
@@ -372,9 +426,8 @@ module OMQ::ZMTP
       raise ProtocolError.new("vouch client transient key mismatch") unless Natron::Util.verify32(vouch_plain[0, 32], cn_public.bytes)
       raise ProtocolError.new("vouch server key mismatch") unless Natron::Util.verify32(vouch_plain[32, 32], @permanent_public.bytes)
 
-      if auth = @authenticator
-        raise ProtocolError.new("client key not authorized") unless auth.call(client_permanent.bytes)
-      end
+      peer_props = Command.parse_properties(metadata_bytes)
+      authenticate_peer!(client_permanent.bytes, peer_props, peer_address)
 
       # --- READY ---
       props_io = IO::Memory.new
@@ -389,13 +442,27 @@ module OMQ::ZMTP
 
       write_command(io, build_command("READY", join_bytes([r_short, r_ct])))
 
-      peer_props = Command.parse_properties(metadata_bytes)
       @session_box = session
       @send_nonce = 1_u64
       @recv_nonce = 0_u64
       peer_props
     end
 
+    private def authenticate_peer!(
+      public_key : Bytes,
+      peer_props : Hash(String, Bytes),
+      peer_address : String?,
+    ) : Nil
+      identity = peer_props["Identity"]?
+      identity = nil if identity && identity.empty?
+
+      if auth = @peer_authenticator
+        peer = PeerInfo.new(public_key: public_key, identity: identity, peer_address: peer_address)
+        raise ProtocolError.new("client key not authorized") unless auth.call(peer)
+      elsif auth = @key_authenticator
+        raise ProtocolError.new("client key not authorized") unless auth.call(public_key)
+      end
+    end
 
     private def write_property(io : IO::Memory, name : String, value : Bytes) : Nil
       name_bytes = name.to_slice

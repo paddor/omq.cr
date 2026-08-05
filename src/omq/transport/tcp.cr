@@ -53,6 +53,12 @@ module OMQ
         TCPSocket.new(host, port)
       end
 
+      def peer_address(tcp : TCPSocket) : String?
+        tcp.remote_address.to_s
+      rescue
+        nil
+      end
+
       # Handshake a TCP socket, spawn read + write pump fibers, and
       # expose the result as a `Pipe`. Closing either channel end or the
       # socket tears all three down.
@@ -80,11 +86,13 @@ module OMQ
         tcp.tcp_nodelay = true
         tcp.send_buffer_size = sndbuf if sndbuf
         tcp.recv_buffer_size = rcvbuf if rcvbuf
+        peer_address = TCP.peer_address(tcp)
         zmtp = ZMTP::Connection.new(tcp, mechanism, max_message_size)
         zmtp.handshake(
           local_socket_type: local_socket_type,
           local_identity: local_identity,
           as_server: as_server,
+          peer_address: peer_address,
         )
 
         tx = Channel(Message).new(send_capacity)
@@ -116,6 +124,7 @@ module OMQ
           close_signal: close_signal,
         )
         pipe.peer_zmtp_minor = zmtp.peer_minor
+        pipe.peer_address = peer_address
         if identity = zmtp.peer_properties["Identity"]?
           pipe.peer_identity = identity
         end

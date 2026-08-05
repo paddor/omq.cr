@@ -54,7 +54,10 @@ module OMQ
           @pipes_by_id[identity] = pipe
           previous
         end
-        old.close if old && !old.same?(pipe)
+        if old && !old.same?(pipe)
+          old.mark_disconnect(DisconnectReason::Handover)
+          old.close
+        end
       end
 
       private def forget_route(identity : Bytes, pipe : Pipe) : Nil

@@ -91,6 +91,7 @@ module OMQ
           local_socket_type: local_socket_type,
           local_identity: local_identity,
           as_server: as_server,
+          peer_address: nil,
         )
 
         tx = Channel(Message).new(send_capacity)

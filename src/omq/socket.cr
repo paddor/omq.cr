@@ -167,6 +167,7 @@ module OMQ
           pipe = dial(scheme, endpoint)
           if register_pipe(pipe, endpoint)
             emit_monitor(MonitorEvent::Kind::Connected, endpoint, pipe)
+            emit_monitor(MonitorEvent::Kind::HandshakeSucceeded, endpoint, pipe)
             spawn supervise_pipe(pipe, scheme, endpoint)
           end
         rescue err : IO::Error | ProtocolError
@@ -288,12 +289,15 @@ module OMQ
       pipe : Pipe? = nil,
       error : Exception? = nil,
       connection : ConnectionInfo? = nil,
+      reason : DisconnectReason? = nil,
+      peer_address : String? = nil,
     ) : Nil
       ch = @state_mutex.synchronize { @monitor }
       return unless ch
       return if ch.closed?
       info = connection || pipe.try { |p| @state_mutex.synchronize { @connection_infos[p]? } }
-      ev = MonitorEvent.new(kind, endpoint, pipe, error, info)
+      address = peer_address || info.try(&.peer_address) || pipe.try(&.peer_address)
+      ev = MonitorEvent.new(kind, endpoint, pipe, error, info, reason, address)
       select
       when ch.send(ev)
       else
@@ -310,7 +314,8 @@ module OMQ
       removed = unregister_pipe(pipe)
       return unless removed
       _removed_endpoint, info = removed
-      emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe, connection: info)
+      reason = pipe.disconnect_reason || DisconnectReason::PeerClosed
+      emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe, connection: info, reason: reason)
       return if connect_endpoint_disabled?(endpoint)
       connection_manager(scheme, endpoint, initial_delay: nil)
     end
@@ -332,12 +337,14 @@ module OMQ
         end
         next unless register_pipe(pipe, endpoint)
         emit_monitor(MonitorEvent::Kind::Connected, endpoint, pipe)
+        emit_monitor(MonitorEvent::Kind::HandshakeSucceeded, endpoint, pipe)
         pipe.await_closed
         break unless connect_endpoint_enabled?(endpoint)
         removed = unregister_pipe(pipe)
         next unless removed
         _removed_endpoint, info = removed
-        emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe, connection: info)
+        reason = pipe.disconnect_reason || DisconnectReason::PeerClosed
+        emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe, connection: info, reason: reason)
         delay_hint = nil
       end
     end
@@ -715,9 +722,14 @@ module OMQ
       end
     end
 
-    private def reject_pending_handshake(io : IO, endpoint : String) : Nil
+    private def reject_pending_handshake(io : IO, endpoint : String, peer_address : String? = nil) : Nil
       io.close rescue nil
-      emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: Error.new("max pending handshakes reached"))
+      emit_monitor(
+        MonitorEvent::Kind::HandshakeFailed,
+        endpoint,
+        error: Error.new("max pending handshakes reached"),
+        peer_address: peer_address,
+      )
     end
 
     private def register_pipe(pipe : Pipe, endpoint : String) : Bool
@@ -732,6 +744,7 @@ module OMQ
             peer_identity: pipe.peer_identity,
             peer_zmtp_minor: pipe.peer_zmtp_minor,
             connected_at: Time.utc,
+            peer_address: pipe.peer_address,
           )
           @next_connection_id += 1
           @pipes << pipe
@@ -782,8 +795,15 @@ module OMQ
     private def close_pipes_at(endpoint : String) : Nil
       removed = detach_pipes_at(endpoint)
       removed.each do |pipe, info|
+        pipe.mark_disconnect(DisconnectReason::LocalClose)
         pipe.close
-        emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe, connection: info)
+        emit_monitor(
+          MonitorEvent::Kind::Disconnected,
+          endpoint,
+          pipe,
+          connection: info,
+          reason: DisconnectReason::LocalClose,
+        )
       end
     end
 
@@ -917,7 +937,7 @@ module OMQ
         break unless tcp
         break if closed?
         unless try_acquire_pending_handshake?
-          reject_pending_handshake(tcp, endpoint)
+          reject_pending_handshake(tcp, endpoint, Transport::TCP.peer_address(tcp))
           next
         end
         spawn handle_tcp_accept(tcp, endpoint)
@@ -925,6 +945,7 @@ module OMQ
     end
 
     private def handle_tcp_accept(tcp : TCPSocket, endpoint : String) : Nil
+      peer_address = Transport::TCP.peer_address(tcp)
       begin
         pipe = with_handshake_timeout(tcp) do
           Transport::TCP.adopt(
@@ -945,11 +966,12 @@ module OMQ
         end
         if register_pipe(pipe, endpoint)
           emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
+          emit_monitor(MonitorEvent::Kind::HandshakeSucceeded, endpoint, pipe)
           spawn watch_pipe_close(pipe, endpoint)
         end
       rescue err : IO::Error | ProtocolError
         tcp.close rescue nil
-        emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err)
+        emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err, peer_address: peer_address)
       ensure
         release_pending_handshake
       end
@@ -985,7 +1007,7 @@ module OMQ
         break unless tcp
         break if closed?
         unless try_acquire_pending_handshake?
-          reject_pending_handshake(tcp, endpoint)
+          reject_pending_handshake(tcp, endpoint, Transport::TCP.peer_address(tcp))
           next
         end
         spawn handle_lz4_tcp_accept(tcp, endpoint)
@@ -993,6 +1015,7 @@ module OMQ
     end
 
     private def handle_lz4_tcp_accept(tcp : TCPSocket, endpoint : String) : Nil
+      peer_address = Transport::TCP.peer_address(tcp)
       begin
         pipe = with_handshake_timeout(tcp) do
           Transport::Lz4Tcp.adopt(
@@ -1015,11 +1038,12 @@ module OMQ
         end
         if register_pipe(pipe, endpoint)
           emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
+          emit_monitor(MonitorEvent::Kind::HandshakeSucceeded, endpoint, pipe)
           spawn watch_pipe_close(pipe, endpoint)
         end
       rescue err : IO::Error | ProtocolError
         tcp.close rescue nil
-        emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err)
+        emit_monitor(MonitorEvent::Kind::HandshakeFailed, endpoint, error: err, peer_address: peer_address)
       ensure
         release_pending_handshake
       end
@@ -1059,6 +1083,7 @@ module OMQ
         end
         if register_pipe(pipe, endpoint)
           emit_monitor(MonitorEvent::Kind::Accepted, endpoint, pipe)
+          emit_monitor(MonitorEvent::Kind::HandshakeSucceeded, endpoint, pipe)
           spawn watch_pipe_close(pipe, endpoint)
         end
       rescue err : IO::Error | ProtocolError
@@ -1075,7 +1100,8 @@ module OMQ
       removed = unregister_pipe(pipe)
       return unless removed
       _removed_endpoint, info = removed
-      emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe, connection: info)
+      reason = pipe.disconnect_reason || DisconnectReason::PeerClosed
+      emit_monitor(MonitorEvent::Kind::Disconnected, endpoint, pipe, connection: info, reason: reason)
     end
 
     delegate send_hwm, recv_hwm, linger, identity,

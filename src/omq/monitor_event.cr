@@ -1,4 +1,11 @@
 module OMQ
+  enum DisconnectReason
+    PeerClosed
+    LocalClose
+    Handover
+    Error
+  end
+
   # Connection lifecycle event surfaced via `Socket#monitor`. A subscriber
   # iterates with `while ev = channel.receive?; …; end` — the channel is
   # closed when the socket closes.
@@ -10,6 +17,7 @@ module OMQ
       Disconnected
       ConnectDelayed
       ConnectRetried
+      HandshakeSucceeded
       HandshakeFailed
       Closed
     end
@@ -19,6 +27,8 @@ module OMQ
     getter pipe : Pipe?
     getter error : Exception?
     getter connection : ConnectionInfo?
+    getter reason : DisconnectReason?
+    getter peer_address : String?
     getter at : Time
 
     def initialize(
@@ -27,6 +37,8 @@ module OMQ
       @pipe : Pipe? = nil,
       @error : Exception? = nil,
       @connection : ConnectionInfo? = nil,
+      @reason : DisconnectReason? = nil,
+      @peer_address : String? = nil,
     )
       @at = Time.utc
     end
