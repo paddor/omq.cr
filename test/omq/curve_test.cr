@@ -1,6 +1,39 @@
 require "../test_helper"
 require "../../src/omq/curve"
 
+describe "CURVE key helpers" do
+  it "encodes and decodes RFC 32 Z85 data" do
+    raw = Bytes[0x86_u8, 0x4f_u8, 0xd2_u8, 0x6f_u8, 0xb5_u8, 0x59_u8, 0xf7_u8, 0x5b_u8]
+
+    assert_equal "HelloWorld", OMQ::Curve.z85_encode(raw)
+    assert_equal raw, OMQ::Curve.z85_decode("HelloWorld")
+  end
+
+  it "rejects invalid Z85 inputs" do
+    assert_raises(ArgumentError) { OMQ::Curve.z85_encode(Bytes[1_u8, 2_u8, 3_u8]) }
+    assert_raises(ArgumentError) { OMQ::Curve.z85_decode("abcd") }
+    assert_raises(ArgumentError) { OMQ::Curve.z85_decode("Hell\\World") }
+  end
+
+  it "generates keypairs with raw and Z85 accessors" do
+    keys = OMQ::Curve::KeyPair.generate
+
+    assert_equal 32, keys.public_bytes.size
+    assert_equal 32, keys.secret_bytes.size
+    assert_equal 40, keys.public_z85.size
+    assert_equal 40, keys.secret_z85.size
+    assert_equal keys.public_bytes, OMQ::Curve::PublicKey.from_z85(keys.public_z85).bytes
+    assert_equal keys.secret_bytes, OMQ::Curve::SecretKey.from_z85(keys.secret_z85).bytes
+    refute keys.inspect.includes?(keys.secret_z85)
+  end
+
+  it "derives a public key from a secret key" do
+    keys = OMQ::Curve::KeyPair.generate
+
+    assert_equal keys.public_bytes, keys.secret_key.derive_public.bytes
+  end
+end
+
 describe "CURVE encryption" do
   def generate_keypair
     sk = Natron::PrivateKey.generate
@@ -30,6 +63,39 @@ describe "CURVE encryption" do
       reply = req.receive
       assert_equal 1, reply.size
       assert_equal "HELLO", String.new(reply[0])
+
+      req.close
+      rep.close
+    end
+  end
+
+  it "accepts Z85 strings and key wrappers" do
+    server_keys = OMQ::Curve::KeyPair.generate
+    client_keys = OMQ::Curve::KeyPair.generate
+
+    OMQ::TestHelper.with_timeout(3.seconds) do
+      rep = OMQ::REP.new
+      rep.mechanism = OMQ::ZMTP::Mechanism::Curve.server(
+        public_key: server_keys.public_z85,
+        secret_key: server_keys.secret_z85,
+      )
+      rep.bind("tcp://127.0.0.1:0")
+
+      req = OMQ::REQ.new
+      req.mechanism = OMQ::ZMTP::Mechanism::Curve.client(
+        server_key: server_keys.public_key,
+        public_key: client_keys.public_z85,
+        secret_key: client_keys.secret_key,
+      )
+      req.connect("tcp://127.0.0.1:#{rep.port}")
+
+      spawn do
+        msg = rep.receive
+        rep.send(msg)
+      end
+
+      req.send("z85")
+      assert_equal "z85", String.new(req.receive[0])
 
       req.close
       rep.close
@@ -154,6 +220,7 @@ describe "CURVE encryption" do
 
       peer = seen.receive
       assert_equal client_pub, peer.public_key
+      assert_equal OMQ::Curve.z85_encode(client_pub), peer.public_z85
       assert_equal "curve-client", String.new(peer.identity.not_nil!)
       assert peer.peer_address.not_nil!.includes?("127.0.0.1")
 

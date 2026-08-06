@@ -1,4 +1,5 @@
 require "natron"
+require "../../curve/keys"
 
 module OMQ::ZMTP
   # CurveZMQ (RFC 26): Curve25519 key exchange + XSalsa20-Poly1305
@@ -24,6 +25,9 @@ module OMQ::ZMTP
   #     req.connect("tcp://127.0.0.1:5555")
   class Mechanism::Curve < Mechanism
     NAME = "CURVE"
+
+    alias PublicKeySource = Bytes | String | ::OMQ::Curve::PublicKey
+    alias SecretKeySource = Bytes | String | ::OMQ::Curve::SecretKey
 
     # Nonce prefixes (16 bytes each) per RFC 26.
     NONCE_PREFIX_HELLO     = "CurveZMQHELLO---".to_slice
@@ -55,16 +59,20 @@ module OMQ::ZMTP
         @identity.try(&.dup)
       end
 
+      def public_z85 : String
+        ::OMQ::Curve.z85_encode(@public_key)
+      end
+
       getter peer_address : String?
     end
 
     alias KeyAuthenticator = Proc(Bytes, Bool)
     alias PeerAuthenticator = Proc(PeerInfo, Bool)
 
-    def self.server(*, public_key : Bytes, secret_key : Bytes, authenticator : KeyAuthenticator? = nil) : Curve
+    def self.server(*, public_key : PublicKeySource, secret_key : SecretKeySource, authenticator : KeyAuthenticator? = nil) : Curve
       new(
-        public_key: public_key,
-        secret_key: secret_key,
+        public_key: public_key_bytes(public_key),
+        secret_key: secret_key_bytes(secret_key),
         server_key: nil,
         as_server: true,
         key_authenticator: authenticator,
@@ -72,10 +80,10 @@ module OMQ::ZMTP
       )
     end
 
-    def self.server(*, public_key : Bytes, secret_key : Bytes, authenticator : PeerAuthenticator) : Curve
+    def self.server(*, public_key : PublicKeySource, secret_key : SecretKeySource, authenticator : PeerAuthenticator) : Curve
       new(
-        public_key: public_key,
-        secret_key: secret_key,
+        public_key: public_key_bytes(public_key),
+        secret_key: secret_key_bytes(secret_key),
         server_key: nil,
         as_server: true,
         key_authenticator: nil,
@@ -83,10 +91,10 @@ module OMQ::ZMTP
       )
     end
 
-    def self.server(*, public_key : Bytes, secret_key : Bytes, &authenticator : PeerInfo -> Bool) : Curve
+    def self.server(*, public_key : PublicKeySource, secret_key : SecretKeySource, &authenticator : PeerInfo -> Bool) : Curve
       new(
-        public_key: public_key,
-        secret_key: secret_key,
+        public_key: public_key_bytes(public_key),
+        secret_key: secret_key_bytes(secret_key),
         server_key: nil,
         as_server: true,
         key_authenticator: nil,
@@ -94,8 +102,45 @@ module OMQ::ZMTP
       )
     end
 
-    def self.client(*, server_key : Bytes, public_key : Bytes? = nil, secret_key : Bytes? = nil) : Curve
-      new(public_key: public_key, secret_key: secret_key, server_key: server_key, as_server: false)
+    def self.client(*, server_key : PublicKeySource, public_key : PublicKeySource? = nil, secret_key : SecretKeySource? = nil) : Curve
+      new(
+        public_key: public_key_bytes(public_key),
+        secret_key: secret_key_bytes(secret_key),
+        server_key: public_key_bytes(server_key),
+        as_server: false,
+      )
+    end
+
+    private def self.public_key_bytes(key : Nil) : Nil
+      nil
+    end
+
+    private def self.public_key_bytes(key : Bytes) : Bytes
+      key
+    end
+
+    private def self.public_key_bytes(key : String) : Bytes
+      ::OMQ::Curve::PublicKey.from_z85(key).bytes
+    end
+
+    private def self.public_key_bytes(key : ::OMQ::Curve::PublicKey) : Bytes
+      key.bytes
+    end
+
+    private def self.secret_key_bytes(key : Nil) : Nil
+      nil
+    end
+
+    private def self.secret_key_bytes(key : Bytes) : Bytes
+      key
+    end
+
+    private def self.secret_key_bytes(key : String) : Bytes
+      ::OMQ::Curve::SecretKey.from_z85(key).bytes
+    end
+
+    private def self.secret_key_bytes(key : ::OMQ::Curve::SecretKey) : Bytes
+      key.bytes
     end
 
     @permanent_public : Natron::PublicKey

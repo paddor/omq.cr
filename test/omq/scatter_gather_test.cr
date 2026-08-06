@@ -15,10 +15,9 @@ describe "SCATTER/GATHER over inproc" do
     end
   end
 
-
   it "round-robins across multiple SCATTER senders" do
     OMQ::TestHelper.with_timeout(2.seconds) do
-      g  = OMQ::GATHER.bind("inproc://sg-rr")
+      g = OMQ::GATHER.bind("inproc://sg-rr")
       s1 = OMQ::SCATTER.connect("inproc://sg-rr")
       s2 = OMQ::SCATTER.connect("inproc://sg-rr")
 

@@ -1,6 +1,5 @@
 require "./system_test_helper"
 
-
 describe "Ruby REP ↔ Crystal REQ over TCP" do
   it "round-trips a string and gets it back uppercased" do
     if OMQ::SystemTestHelper.ruby_bin.nil?

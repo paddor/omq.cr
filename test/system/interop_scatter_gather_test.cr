@@ -1,7 +1,6 @@
 require "./system_test_helper"
 require "../../src/omq/scatter_gather"
 
-
 describe "Crystal SCATTER ↔ Ruby GATHER over TCP" do
   it "delivers single-frame messages to the Ruby GATHER" do
     if OMQ::SystemTestHelper.ruby_bin.nil?

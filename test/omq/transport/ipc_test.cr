@@ -4,12 +4,10 @@ private def abs_endpoint(tag : String) : String
   "ipc://@omq-test-#{tag}-#{Process.pid}"
 end
 
-
 private def fs_endpoint(tag : String) : {String, String}
   path = "/tmp/omq-test-#{tag}-#{Process.pid}.sock"
   {"ipc://#{path}", path}
 end
-
 
 describe "PAIR over IPC (filesystem path)" do
   it "round-trips messages and cleans up the socket file" do
@@ -36,7 +34,6 @@ describe "PAIR over IPC (filesystem path)" do
   end
 end
 
-
 describe "PAIR over IPC (abstract namespace)" do
   it "round-trips without touching the filesystem" do
     endpoint = abs_endpoint("pair-abs")
@@ -54,7 +51,6 @@ describe "PAIR over IPC (abstract namespace)" do
     end
   end
 end
-
 
 describe "REQ/REP over IPC" do
   it "round-trips requests and replies" do

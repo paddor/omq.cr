@@ -1,7 +1,6 @@
 require "./system_test_helper"
 require "../../src/omq/client_server"
 
-
 describe "Crystal CLIENT ↔ Ruby SERVER over TCP" do
   it "round-trips a request and receives an uppercased reply" do
     if OMQ::SystemTestHelper.ruby_bin.nil?

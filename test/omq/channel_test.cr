@@ -18,10 +18,9 @@ describe "CHANNEL over inproc" do
     end
   end
 
-
   it "drops a second connector" do
     OMQ::TestHelper.with_timeout(2.seconds) do
-      a  = OMQ::CHANNEL.bind("inproc://ch-solo")
+      a = OMQ::CHANNEL.bind("inproc://ch-solo")
       b1 = OMQ::CHANNEL.connect("inproc://ch-solo")
       b2 = OMQ::CHANNEL.connect("inproc://ch-solo")
 
