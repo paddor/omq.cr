@@ -1,7 +1,7 @@
 require "../../src/omq"
 
 endpoint = ARGV[0]? || "tcp://*:5557"
-id       = ARGV[1]? || Process.pid.to_s
+id = ARGV[1]? || Process.pid.to_s
 
 pull = OMQ::PULL.new
 if endpoint.starts_with?(">")

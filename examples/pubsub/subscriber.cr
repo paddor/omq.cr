@@ -1,7 +1,7 @@
 require "../../src/omq"
 
 endpoint = ARGV[0]? || "tcp://localhost:5556"
-prefix   = ARGV[1]? || ""
+prefix = ARGV[1]? || ""
 
 sub = OMQ::SUB.new(endpoint)
 sub.subscribe(prefix)
