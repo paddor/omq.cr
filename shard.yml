@@ -1,5 +1,5 @@
 name: omq
-version: 0.1.0
+version: 0.2.0
 
 description: |
   Pure-Crystal ZeroMQ (ZMTP 3.1). No context, no libzmq, no FFI.
