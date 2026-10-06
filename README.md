@@ -1,5 +1,9 @@
 # ØMQ - ZeroMQ for Crystal, no C required
 
+> **Abandoned:** This project is outdated, incomplete, and probably contains bugs.
+> Use the maintained [OMQ.rs Crystal binding](https://github.com/paddor/omq-binding.cr)
+> instead. The information below may no longer be accurate.
+
 [![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](LICENSE)
 [![Crystal](https://img.shields.io/badge/Crystal-%3E%3D%201.21-000000?logo=crystal&logoColor=white)](https://crystal-lang.org)
 
@@ -43,7 +47,7 @@ Sibling projects:
 - **Security mechanisms**: NULL by default, PLAIN username/password auth,
   CURVE encryption via `require "omq/curve"`
 - **Wire-compatible**: interoperates with libzmq, pyzmq, CZMQ, JeroMQ,
-  and the Ruby `omq`, `omq-lz4`, and `omq-zstd` gems
+  and the Ruby `omq` gem
 - **Bind/connect order doesn't matter**: connect before bind, bind before
   connect, peers come and go. Reconnect is automatic; buffered messages
   flush when a peer arrives
